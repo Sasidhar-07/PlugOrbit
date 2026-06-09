@@ -923,6 +923,34 @@ app.get("/payment-success", async (req, res) => {
     `);
   }
 });
+app.get("/owner/revenue/:ownerId", async (req, res) => {
+  try {
+    const { ownerId } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT
+        COUNT(*) as total_bookings,
+        COUNT(*) FILTER (WHERE b.booking_status = 'Completed') as completed_sessions,
+        COUNT(*) FILTER (WHERE b.booking_status = 'Charging') as charging_sessions,
+        COUNT(*) FILTER (WHERE b.booking_status = 'Booked') as booked_sessions,
+        COUNT(*) FILTER (WHERE b.payment_status = 'success') as paid_bookings
+      FROM bookings b
+      JOIN stations s
+      ON b.station_id::integer = s.id
+      WHERE s.owner_id = $1
+      `,
+      [ownerId]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Revenue API error:", error);
+    res.status(500).json({
+      message: "Failed to fetch revenue data",
+    });
+  }
+});
 app.listen(PORT, "0.0.0.0", () => {
   
   console.log(`Server running on http://0.0.0.0:${PORT}`);
