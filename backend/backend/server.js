@@ -951,6 +951,69 @@ app.get("/owner/revenue/:ownerId", async (req, res) => {
     });
   }
 });
+app.get("/admin/stations", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT s.*, u.name AS owner_name, u.email AS owner_email
+      FROM stations s
+      LEFT JOIN users u ON s.owner_id = u.id
+      ORDER BY s.id DESC
+    `);
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Admin stations error:", error);
+    res.status(500).json({ message: "Failed to load stations" });
+  }
+});
+
+app.put("/admin/approve-station/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `
+      UPDATE stations
+      SET approval_status = 'Approved'
+      WHERE id = $1
+      RETURNING *
+      `,
+      [id]
+    );
+
+    res.json({
+      message: "Station approved successfully",
+      station: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Approve station error:", error);
+    res.status(500).json({ message: "Failed to approve station" });
+  }
+});
+
+app.put("/admin/reject-station/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `
+      UPDATE stations
+      SET approval_status = 'Rejected'
+      WHERE id = $1
+      RETURNING *
+      `,
+      [id]
+    );
+
+    res.json({
+      message: "Station rejected successfully",
+      station: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Reject station error:", error);
+    res.status(500).json({ message: "Failed to reject station" });
+  }
+});
 app.listen(PORT, "0.0.0.0", () => {
   
   console.log(`Server running on http://0.0.0.0:${PORT}`);
