@@ -5,6 +5,7 @@ const pool = require("./db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Razorpay = require("razorpay");
+const crypto = require("crypto");
 
 const app = express();
 const PORT = 5001; // Using 5001 to avoid macOS AirPlay conflicts
@@ -784,6 +785,142 @@ app.put("/owner/complete-charging/:bookingId", async (req, res) => {
     res.status(500).json({
       message: "Failed to complete charging",
     });
+  }
+});
+app.post("/create-order", async (req, res) => {
+  try {
+    const { amount } = req.body;
+
+    const options = {
+      amount: amount * 100, // Razorpay uses paise
+      currency: "INR",
+      receipt: `receipt_${Date.now()}`,
+    };
+
+    const order = await razorpay.orders.create(options);
+
+    res.json(order);
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      message: "Failed to create order",
+    });
+  }
+});
+app.get("/pay/:amount", async (req, res) => {
+  try {
+    const amount = Number(req.params.amount);
+
+    const order = await razorpay.orders.create({
+      amount: amount * 100,
+      currency: "INR",
+      receipt: `receipt_${Date.now()}`,
+    });
+
+    res.send(`
+    <html>
+    <head>
+      <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+    </head>
+    <body>
+      <script>
+        var options = {
+          key: "${process.env.RAZORPAY_KEY_ID}",
+          amount: ${amount * 100},
+          currency: "INR",
+          name: "PlugOrbit",
+          description: "EV Charging Payment",
+          order_id: "${order.id}",
+          prefill: {
+            name: "Sasidhar",
+            email: "test@example.com",
+            contact: "9999999999"
+          },
+          handler: function (response) {
+            window.location.href =
+              "http://192.168.1.7:5001/payment-success?payment_id=" +
+              response.razorpay_payment_id;
+          },
+          theme: {
+            color: "#16a34a"
+          }
+        };
+
+        var rzp = new Razorpay(options);
+        rzp.open();
+      </script>
+    </body>
+    </html>
+    `);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send("Payment page failed");
+  }
+});
+app.get("/payment-success", async (req, res) => {
+  try {
+    const {
+      payment_id,
+      station_id,
+      station_name,
+      vehicle,
+      date,
+      time,
+      duration,
+      user_id,
+    } = req.query;
+
+    await pool.query(
+      `
+      INSERT INTO bookings
+      (
+        station_id,
+        station_name,
+        vehicle,
+        date,
+        time,
+        duration,
+        user_id,
+        payment_id,
+        payment_status,
+        booking_status
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'success','Booked')
+      `,
+      [
+        station_id,
+        station_name,
+        vehicle,
+        date,
+        time,
+        duration,
+        user_id,
+        payment_id,
+      ]
+    );
+
+    res.send(`
+      <html>
+        <body style="font-family: Arial; text-align: center; padding-top: 80px;">
+          <h1 style="color: green;">Booking Confirmed ✅</h1>
+          <p>Payment successful and slot booked.</p>
+          <p>Payment ID: ${payment_id}</p>
+          <p>You can go back to PlugOrbit app.</p>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error("Payment success booking error:", error);
+
+    res.send(`
+      <html>
+        <body style="font-family: Arial; text-align: center; padding-top: 80px;">
+          <h1 style="color: red;">Payment Done, Booking Failed ❌</h1>
+          <p>Please contact PlugOrbit support.</p>
+        </body>
+      </html>
+    `);
   }
 });
 app.listen(PORT, "0.0.0.0", () => {
