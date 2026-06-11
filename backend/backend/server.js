@@ -8,7 +8,7 @@ const Razorpay = require("razorpay");
 const crypto = require("crypto");
 
 const app = express();
-const PORT = 5001; // Using 5001 to avoid macOS AirPlay conflicts
+const PORT = process.env.PORT || 5001;
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
