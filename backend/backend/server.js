@@ -1014,6 +1014,124 @@ app.put("/admin/reject-station/:id", async (req, res) => {
     res.status(500).json({ message: "Failed to reject station" });
   }
 });
+app.post("/verify-qr", async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM bookings
+      WHERE id = $1
+      `,
+      [bookingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    const booking = result.rows[0];
+
+    if (booking.payment_status !== "success") {
+      return res.json({
+        success: false,
+        message: "Payment not completed",
+      });
+    }
+
+    if (booking.booking_status === "Completed") {
+      return res.json({
+        success: false,
+        message: "This booking is already completed",
+      });
+    }
+
+    res.json({
+      success: true,
+      booking,
+    });
+  } catch (error) {
+    console.error("Verify QR error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to verify QR",
+    });
+  }
+});
+
+app.post("/start-charging/:bookingId", async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const result = await pool.query(
+      `
+      UPDATE bookings
+      SET booking_status = 'Charging'
+      WHERE id = $1
+      RETURNING *
+      `,
+      [bookingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Charging started",
+      booking: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Start charging QR error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to start charging",
+    });
+  }
+});
+
+app.post("/complete-charging/:bookingId", async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const result = await pool.query(
+      `
+      UPDATE bookings
+      SET booking_status = 'Completed'
+      WHERE id = $1
+      RETURNING *
+      `,
+      [bookingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Charging completed",
+      booking: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Complete charging QR error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to complete charging",
+    });
+  }
+});
 app.listen(PORT, "0.0.0.0", () => {
   
   console.log(`Server running on http://0.0.0.0:${PORT}`);
