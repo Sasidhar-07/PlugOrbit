@@ -366,22 +366,17 @@ app.post("/verify-qr", async (req, res) => {
   try {
     const { bookingId } = req.body;
 
-    if (!bookingId) {
-      return res.status(400).json({
-        success: false,
-        message: "Booking ID is required",
-      });
-    }
-
     const result = await pool.query(
-      `SELECT *
-       FROM bookings
-       WHERE id = $1`,
+      `
+      SELECT *
+      FROM bookings
+      WHERE id = $1
+      `,
       [bookingId]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({
+      return res.json({
         success: false,
         message: "Booking not found",
       });
@@ -390,53 +385,29 @@ app.post("/verify-qr", async (req, res) => {
     const booking = result.rows[0];
 
     if (booking.payment_status !== "success") {
-      return res.status(400).json({
+      return res.json({
         success: false,
         message: "Payment not completed",
       });
     }
 
-    res.json({
-      success: true,
-      message: "Booking verified successfully",
-      booking,
-    });
-  } catch (error) {
-    console.error("QR verify error:", error);
-    res.status(500).json({
-      success: false,
-      message: "QR verification failed",
-    });
-  }
-});
-app.post("/start-charging/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const result = await pool.query(
-      `UPDATE bookings
-       SET booking_status = 'Charging'
-       WHERE id = $1
-       RETURNING *`,
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
+    if (booking.booking_status === "Completed") {
+      return res.json({
         success: false,
-        message: "Booking not found",
+        message: "Booking already completed",
       });
     }
 
     res.json({
       success: true,
-      booking: result.rows[0],
+      booking,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Verify QR error:", error);
+
     res.status(500).json({
       success: false,
-      message: "Failed to start charging",
+      message: "Failed to verify QR",
     });
   }
 });
@@ -572,7 +543,7 @@ app.get("/owner/bookings/:ownerId", async (req, res) => {
   }
 });
 
-app.put("/owner/start-charging/:bookingId", async (req, res) => {
+app.post("/start-charging/:bookingId", async (req, res) => {
   try {
     const { bookingId } = req.params;
 
@@ -587,24 +558,27 @@ app.put("/owner/start-charging/:bookingId", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({
+      return res.json({
+        success: false,
         message: "Booking not found",
       });
     }
 
     res.json({
-      message: "Charging started successfully",
+      success: true,
       booking: result.rows[0],
     });
   } catch (error) {
     console.error(error);
+
     res.status(500).json({
+      success: false,
       message: "Failed to start charging",
     });
   }
 });
 
-app.put("/owner/complete-charging/:bookingId", async (req, res) => {
+app.post("/complete-charging/:bookingId", async (req, res) => {
   try {
     const { bookingId } = req.params;
 
@@ -619,18 +593,21 @@ app.put("/owner/complete-charging/:bookingId", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({
+      return res.json({
+        success: false,
         message: "Booking not found",
       });
     }
 
     res.json({
-      message: "Charging completed successfully",
+      success: true,
       booking: result.rows[0],
     });
   } catch (error) {
     console.error(error);
+
     res.status(500).json({
+      success: false,
       message: "Failed to complete charging",
     });
   }
@@ -839,7 +816,7 @@ app.get("/pay/:amount", async (req, res) => {
           },
           handler: function (response) {
             window.location.href =
-              "http://192.168.1.7:5001/payment-success?payment_id=" +
+              "https://plugorbit.onrender.com/payment-success?payment_id=" +
               response.razorpay_payment_id;
           },
           theme: {
