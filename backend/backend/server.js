@@ -578,73 +578,7 @@ app.post("/start-charging/:bookingId", async (req, res) => {
   }
 });
 
-app.post("/complete-charging/:bookingId", async (req, res) => {
-  try {
-    const { bookingId } = req.params;
 
-    const result = await pool.query(
-      `
-      UPDATE bookings
-      SET booking_status = 'Completed'
-      WHERE id = $1
-      RETURNING *
-      `,
-      [bookingId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.json({
-        success: false,
-        message: "Booking not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      booking: result.rows[0],
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to complete charging",
-    });
-  }
-});
-app.post("/admin/approve-payment/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const result = await pool.query(
-      `UPDATE bookings
-       SET payment_status = 'success',
-           booking_status = 'Booked'
-       WHERE id = $1
-       RETURNING *`,
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Payment approved successfully",
-      booking: result.rows[0],
-    });
-  } catch (error) {
-    console.error("Approve payment error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to approve payment",
-    });
-  }
-});
 app.post("/owner/add-station", async (req, res) => {
   try {
     const {
@@ -740,30 +674,7 @@ app.put("/owner/start-charging/:bookingId", async (req, res) => {
     });
   }
 });
-app.put("/owner/complete-charging/:bookingId", async (req, res) => {
-  try {
-    const { bookingId } = req.params;
 
-    await pool.query(
-      `
-      UPDATE bookings
-      SET booking_status = 'Completed'
-      WHERE id = $1
-      `,
-      [bookingId]
-    );
-
-    res.json({
-      message: "Charging completed",
-    });
-  } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Failed to complete charging",
-    });
-  }
-});
 app.post("/create-order", async (req, res) => {
   try {
     const { amount } = req.body;
@@ -1103,6 +1014,41 @@ app.post("/complete-charging/:bookingId", async (req, res) => {
     });
   } catch (error) {
     console.error("Complete charging QR error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to complete charging",
+    });
+  }
+});
+app.put("/complete-charging/:bookingId", async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const result = await pool.query(
+      `
+      UPDATE bookings
+      SET booking_status = 'Completed'
+      WHERE id = $1
+      RETURNING *
+      `,
+      [bookingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Charging completed successfully",
+      booking: result.rows[0],
+    });
+  } catch (error) {
+    console.error(error);
+
     res.status(500).json({
       success: false,
       message: "Failed to complete charging",
