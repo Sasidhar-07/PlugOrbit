@@ -1055,6 +1055,36 @@ app.put("/complete-charging/:bookingId", async (req, res) => {
     });
   }
 });
+app.post("/save-push-token", async (req, res) => {
+  try {
+    const { userId, expoPushToken } = req.body;
+
+    if (!userId || !expoPushToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing userId or expoPushToken",
+      });
+    }
+
+    await pool.query(
+      `UPDATE users
+       SET expo_push_token = $1
+       WHERE id = $2`,
+      [expoPushToken, userId]
+    );
+
+    res.json({
+      success: true,
+      message: "Push token saved successfully",
+    });
+  } catch (error) {
+    console.error("Save Push Token Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to save push token",
+    });
+  }
+});
 app.listen(PORT, "0.0.0.0", () => {
   
   console.log(`Server running on http://0.0.0.0:${PORT}`);
