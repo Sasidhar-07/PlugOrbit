@@ -1040,14 +1040,14 @@ app.post("/verify-qr", async (req, res) => {
   }
 });
 
-app.post("/start-charging/:bookingId", async (req, res) => {
+app.put("/complete-charging/:bookingId", async (req, res) => {
   try {
     const { bookingId } = req.params;
 
     const result = await pool.query(
       `
       UPDATE bookings
-      SET booking_status = 'Charging'
+      SET booking_status = 'Completed'
       WHERE id = $1
       RETURNING *
       `,
@@ -1055,7 +1055,7 @@ app.post("/start-charging/:bookingId", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.json({
+      return res.status(404).json({
         success: false,
         message: "Booking not found",
       });
@@ -1063,18 +1063,18 @@ app.post("/start-charging/:bookingId", async (req, res) => {
 
     res.json({
       success: true,
-      message: "Charging started",
+      message: "Charging completed",
       booking: result.rows[0],
     });
   } catch (error) {
-    console.error("Start charging QR error:", error);
+    console.error("Complete charging error:", error);
+
     res.status(500).json({
       success: false,
-      message: "Failed to start charging",
+      message: "Failed to complete charging",
     });
   }
 });
-
 app.post("/complete-charging/:bookingId", async (req, res) => {
   try {
     const { bookingId } = req.params;
