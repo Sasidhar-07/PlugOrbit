@@ -409,9 +409,11 @@ app.get("/owner/bookings/:ownerId", async (req, res) => {
          u.name AS customer_name,
          u.email AS customer_email
        FROM bookings b
-       JOIN stations s ON s.id = b.station_id
-       LEFT JOIN users u ON u.id = b.user_id
-       WHERE s.owner_id = $1
+       JOIN stations s
+         ON s.id::text = b.station_id::text
+       LEFT JOIN users u
+         ON u.id::text = b.user_id::text
+       WHERE s.owner_id::text = $1::text
        ORDER BY b.created_at DESC`,
       [req.params.ownerId]
     );
@@ -422,6 +424,7 @@ app.get("/owner/bookings/:ownerId", async (req, res) => {
 
     res.status(500).json({
       message: "Could not fetch owner bookings",
+      error: error.message,
     });
   }
 });
@@ -433,26 +436,26 @@ app.get("/owner/revenue/:ownerId", async (req, res) => {
          COUNT(*)::int AS total_bookings,
 
          COUNT(*) FILTER (
-           WHERE b.payment_status = 'success'
+           WHERE LOWER(b.payment_status) = 'success'
          )::int AS paid_bookings,
 
          COUNT(*) FILTER (
-           WHERE b.booking_status = 'Booked'
+           WHERE LOWER(b.booking_status) = 'booked'
          )::int AS booked_sessions,
 
          COUNT(*) FILTER (
-           WHERE b.booking_status = 'Charging'
+           WHERE LOWER(b.booking_status) = 'charging'
          )::int AS charging_sessions,
 
          COUNT(*) FILTER (
-           WHERE b.booking_status = 'Completed'
+           WHERE LOWER(b.booking_status) = 'completed'
          )::int AS completed_sessions,
 
          COALESCE(
            SUM(
              CASE
-               WHEN b.payment_status = 'success'
-               THEN (b.duration::numeric / 60) * s.price_per_kwh + 5
+               WHEN LOWER(b.payment_status) = 'success'
+               THEN 25
                ELSE 0
              END
            ),
@@ -460,8 +463,9 @@ app.get("/owner/revenue/:ownerId", async (req, res) => {
          )::numeric(10,2) AS revenue
 
        FROM bookings b
-       JOIN stations s ON s.id = b.station_id
-       WHERE s.owner_id = $1`,
+       JOIN stations s
+         ON s.id::text = b.station_id::text
+       WHERE s.owner_id::text = $1::text`,
       [req.params.ownerId]
     );
 
@@ -471,6 +475,7 @@ app.get("/owner/revenue/:ownerId", async (req, res) => {
 
     res.status(500).json({
       message: "Could not fetch owner revenue",
+      error: error.message,
     });
   }
 });
