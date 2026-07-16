@@ -47,26 +47,95 @@ app.post("/book-slot", async (req, res) => {
       paymentId,
       orderId,
       paymentStatus,
+      amountPaid,
     } = req.body;
 
-    if (!userId || !stationId || !date || !time) {
-      return res.status(400).json({ message: "Missing booking details" });
+    if (
+      !userId ||
+      !stationId ||
+      !stationName ||
+      !date ||
+      !time ||
+      !vehicle ||
+      !duration ||
+      !paymentId ||
+      !orderId ||
+      !amountPaid
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing booking or payment details",
+      });
     }
 
-    // check slot
-    const existing = await pool.query(
-      `SELECT * FROM bookings WHERE station_id=$1 AND date=$2 AND time=$3`,
+    const numericAmount = Number(amountPaid);
+
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment amount",
+      });
+    }
+
+    const normalizedPaymentStatus = String(
+      paymentStatus || ""
+    ).toLowerCase();
+
+    if (normalizedPaymentStatus !== "success") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment is not successful",
+      });
+    }
+
+    const existingSlot = await pool.query(
+      `SELECT id
+       FROM bookings
+       WHERE station_id = $1
+         AND date = $2
+         AND time = $3
+         AND booking_status IN ('Booked', 'Charging')
+       LIMIT 1`,
       [stationId, date, time]
     );
 
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ message: "Slot already booked" });
+    if (existingSlot.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "This slot is already booked",
+      });
     }
 
+    const commissionRate = 0.1;
+    const platformCommission = Number(
+      (numericAmount * commissionRate).toFixed(2)
+    );
+    const ownerAmount = Number(
+      (numericAmount - platformCommission).toFixed(2)
+    );
+
     const result = await pool.query(
-      `INSERT INTO bookings 
-      (user_id, station_id, station_name, date, time, vehicle, duration, payment_id, order_id, payment_status, booking_status)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'Booked')
+      `INSERT INTO bookings (
+        user_id,
+        station_id,
+        station_name,
+        date,
+        time,
+        vehicle,
+        duration,
+        payment_id,
+        order_id,
+        payment_status,
+        booking_status,
+        amount_paid,
+        platform_commission,
+        owner_amount,
+        price_per_unit
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+        'Booked',$11,$12,$13,$14
+      )
       RETURNING *`,
       [
         userId,
@@ -75,20 +144,34 @@ app.post("/book-slot", async (req, res) => {
         date,
         time,
         vehicle,
-        duration,
+        Number(duration),
         paymentId,
         orderId,
-        paymentStatus || "success",
+        "success",
+        numericAmount,
+        platformCommission,
+        ownerAmount,
+        numericAmount,
       ]
     );
 
-    res.status(201).json({
+    return res.status(201).json({
+      success: true,
       message: "Booking confirmed",
       booking: result.rows[0],
+      payment: {
+        amount_paid: numericAmount,
+        platform_commission: platformCommission,
+        owner_amount: ownerAmount,
+      },
     });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Booking failed" });
+  } catch (error) {
+    console.error("BOOK SLOT ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Booking failed",
+    });
   }
 });
 
