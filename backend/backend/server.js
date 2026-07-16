@@ -349,35 +349,7 @@ app.post("/save-push-token", async (req, res) => {
     res.status(500).json({ success: false });
   }
 });
-app.get("/booking/:bookingId", async (req, res) => {
-  try {
-    const { bookingId } = req.params;
 
-    const result = await pool.query(
-      "SELECT * FROM bookings WHERE id = $1",
-      [bookingId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      booking: result.rows[0],
-    });
-  } catch (error) {
-    console.error("Booking API Error:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Server Error",
-    });
-  }
-});
 app.get("/booking/:bookingId", async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -404,6 +376,314 @@ app.get("/booking/:bookingId", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Could not fetch booking",
+    });
+  }
+});
+/* ================= OWNER DASHBOARD ================= */
+
+app.get("/owner/stations/:ownerId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT *
+       FROM stations
+       WHERE owner_id = $1
+       ORDER BY id`,
+      [req.params.ownerId]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error("OWNER STATIONS ERROR:", error);
+
+    res.status(500).json({
+      message: "Could not fetch owner stations",
+    });
+  }
+});
+
+app.get("/owner/bookings/:ownerId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         b.*,
+         u.name AS customer_name,
+         u.email AS customer_email
+       FROM bookings b
+       JOIN stations s ON s.id = b.station_id
+       LEFT JOIN users u ON u.id = b.user_id
+       WHERE s.owner_id = $1
+       ORDER BY b.created_at DESC`,
+      [req.params.ownerId]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error("OWNER BOOKINGS ERROR:", error);
+
+    res.status(500).json({
+      message: "Could not fetch owner bookings",
+    });
+  }
+});
+
+app.get("/owner/revenue/:ownerId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_bookings,
+
+         COUNT(*) FILTER (
+           WHERE b.payment_status = 'success'
+         )::int AS paid_bookings,
+
+         COUNT(*) FILTER (
+           WHERE b.booking_status = 'Booked'
+         )::int AS booked_sessions,
+
+         COUNT(*) FILTER (
+           WHERE b.booking_status = 'Charging'
+         )::int AS charging_sessions,
+
+         COUNT(*) FILTER (
+           WHERE b.booking_status = 'Completed'
+         )::int AS completed_sessions,
+
+         COALESCE(
+           SUM(
+             CASE
+               WHEN b.payment_status = 'success'
+               THEN (b.duration::numeric / 60) * s.price_per_kwh + 5
+               ELSE 0
+             END
+           ),
+           0
+         )::numeric(10,2) AS revenue
+
+       FROM bookings b
+       JOIN stations s ON s.id = b.station_id
+       WHERE s.owner_id = $1`,
+      [req.params.ownerId]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("OWNER REVENUE ERROR:", error);
+
+    res.status(500).json({
+      message: "Could not fetch owner revenue",
+    });
+  }
+});
+
+app.put("/owner/start-charging/:bookingId", async (req, res) => {
+  try {
+    const bookingResult = await pool.query(
+      `SELECT *
+       FROM bookings
+       WHERE id = $1`,
+      [req.params.bookingId]
+    );
+
+    if (bookingResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    const duration = Number(
+      bookingResult.rows[0].duration || 30
+    );
+
+    const startTime = new Date();
+    const endTime = new Date(
+      startTime.getTime() + duration * 60000
+    );
+
+    const result = await pool.query(
+      `UPDATE bookings
+       SET
+         booking_status = 'Charging',
+         charging_status = 'charging',
+         charging_start_time = $1,
+         charging_end_time = $2
+       WHERE id = $3
+       RETURNING *`,
+      [startTime, endTime, req.params.bookingId]
+    );
+
+    res.json({
+      success: true,
+      booking: result.rows[0],
+    });
+  } catch (error) {
+    console.error("OWNER START CHARGING ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Could not start charging",
+    });
+  }
+});
+
+app.put("/owner/complete-charging/:bookingId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE bookings
+       SET
+         booking_status = 'Completed',
+         charging_status = 'completed',
+         charging_end_time = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [req.params.bookingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      booking: result.rows[0],
+    });
+  } catch (error) {
+    console.error("OWNER COMPLETE CHARGING ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Could not complete charging",
+    });
+  }
+});
+
+/* ================= ADMIN DASHBOARD ================= */
+
+app.get("/admin/dashboard", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_bookings,
+
+         COUNT(*) FILTER (
+           WHERE booking_status = 'Booked'
+         )::int AS booked,
+
+         COUNT(*) FILTER (
+           WHERE booking_status = 'Charging'
+         )::int AS charging,
+
+         COUNT(*) FILTER (
+           WHERE booking_status = 'Completed'
+         )::int AS completed,
+
+         COUNT(*) FILTER (
+           WHERE payment_status != 'success'
+              OR payment_status IS NULL
+         )::int AS pending_payments,
+
+         COALESCE(
+           SUM(
+             CASE
+               WHEN payment_status = 'success'
+               THEN duration::numeric * 10
+               ELSE 0
+             END
+           ),
+           0
+         )::numeric(10,2) AS revenue
+
+       FROM bookings`
+    );
+
+    const row = result.rows[0];
+
+    res.json({
+      totalBookings: row.total_bookings,
+      booked: row.booked,
+      charging: row.charging,
+      completed: row.completed,
+      pendingPayments: row.pending_payments,
+      revenue: row.revenue,
+    });
+  } catch (error) {
+    console.error("ADMIN DASHBOARD ERROR:", error);
+
+    res.status(500).json({
+      message: "Could not load admin dashboard",
+    });
+  }
+});
+
+app.get("/admin/stations", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         s.*,
+         u.name AS owner_name,
+         u.email AS owner_email
+       FROM stations s
+       LEFT JOIN users u ON u.id = s.owner_id
+       ORDER BY s.id DESC`
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error("ADMIN STATIONS ERROR:", error);
+
+    res.status(500).json({
+      message: "Could not fetch stations",
+    });
+  }
+});
+
+app.put("/admin/approve-station/:id", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE stations
+       SET approval_status = 'Approved'
+       WHERE id = $1
+       RETURNING *`,
+      [req.params.id]
+    );
+
+    res.json({
+      success: true,
+      station: result.rows[0],
+    });
+  } catch (error) {
+    console.error("APPROVE STATION ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Could not approve station",
+    });
+  }
+});
+
+app.put("/admin/reject-station/:id", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE stations
+       SET approval_status = 'Rejected'
+       WHERE id = $1
+       RETURNING *`,
+      [req.params.id]
+    );
+
+    res.json({
+      success: true,
+      station: result.rows[0],
+    });
+  } catch (error) {
+    console.error("REJECT STATION ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Could not reject station",
     });
   }
 });
