@@ -420,109 +420,184 @@ app.post("/verify-qr", async (req, res) => {
 
 /* ================= START CHARGING ================= */
 
-app.put("/start-charging/:bookingId", async (req,res)=>{
-
-try{
-
-const { bookingId } = req.params;
-
-
-// get booking
-const booking = await pool.query(
-`
-SELECT *
-FROM bookings
-WHERE id=$1
-`,
-[bookingId]
-);
-
-
-if(booking.rows.length===0){
-
-return res.json({
-success:false,
-message:"Booking not found"
-});
-
-}
-
-
-const duration = Number(
-booking.rows[0].duration || 30
-);
-
-
-// current time
-const startTime = new Date();
-
-
-// ending time
-const endTime = new Date(
-startTime.getTime() + duration*60000
-);
-
-
-
-const result = await pool.query(
-`
-UPDATE bookings
-
-SET 
-booking_status='Charging',
-charging_start_time=$1,
-charging_end_time=$2
-
-WHERE id=$3
-
-RETURNING *
-`,
-[
-startTime,
-endTime,
-bookingId
-]
-);
-
-
-
-res.json({
-
-success:true,
-
-message:"Charging started",
-
-booking:result.rows[0]
-
-});
-
-
-}
-catch(error){
-
-console.log(error);
-
-res.status(500).json({
-success:false,
-message:"Failed to start charging"
-});
-
-}
-
-});
-/* ================= COMPLETE CHARGING (ONLY ONE) ================= */
-
-app.put("/complete-charging/:bookingId", async (req, res) => {
+app.post("/start-charging/:bookingId", async (req, res) => {
   try {
-    const result = await pool.query(
-      `UPDATE bookings SET booking_status='Completed'
-       WHERE id=$1 RETURNING *`,
-      [req.params.bookingId]
+    const { bookingId } = req.params;
+
+    const bookingResult = await pool.query(
+      `SELECT * FROM bookings WHERE id = $1`,
+      [bookingId]
     );
 
-    res.json({ success: true, booking: result.rows[0] });
-  } catch (err) {
-    res.status(500).json({ message: "Failed" });
+    if (bookingResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    const booking = bookingResult.rows[0];
+
+    if (booking.payment_status !== "success") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment is not completed",
+      });
+    }
+
+    if (booking.booking_status === "Completed") {
+      return res.status(400).json({
+        success: false,
+        message: "This charging session is already completed",
+      });
+    }
+
+    // Prevent scanning the same QR from restarting the timer.
+    if (
+      booking.booking_status === "Charging" &&
+      booking.charging_start_time &&
+      booking.charging_end_time
+    ) {
+      return res.json({
+        success: true,
+        message: "Charging is already active",
+        booking,
+      });
+    }
+
+    const duration = Number(booking.duration);
+
+    if (![30, 60, 120].includes(duration)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid charging duration",
+      });
+    }
+
+    const startTime = new Date();
+    const endTime = new Date(
+      startTime.getTime() + duration * 60 * 1000
+    );
+
+    const result = await pool.query(
+      `
+      UPDATE bookings
+      SET
+        booking_status = 'Charging',
+        charging_start_time = $1,
+        charging_end_time = $2
+      WHERE id = $3
+      RETURNING *
+      `,
+      [startTime, endTime, bookingId]
+    );
+
+    return res.json({
+      success: true,
+      message: "Charging started",
+      booking: result.rows[0],
+    });
+  } catch (error) {
+    console.error("START CHARGING ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to start charging",
+    });
+  }
+});
+
+app.get("/booking/:bookingId", async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    let result = await pool.query(
+      `SELECT * FROM bookings WHERE id = $1`,
+      [bookingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    let booking = result.rows[0];
+
+    // Automatically complete an expired charging session
+    // whenever the booking is fetched.
+    if (
+      booking.booking_status === "Charging" &&
+      booking.charging_end_time &&
+      new Date(booking.charging_end_time).getTime() <= Date.now()
+    ) {
+      result = await pool.query(
+        `
+        UPDATE bookings
+        SET booking_status = 'Completed'
+        WHERE id = $1
+        RETURNING *
+        `,
+        [bookingId]
+      );
+
+      booking = result.rows[0];
+    }
+
+    return res.json({
+      success: true,
+      booking,
+      serverTime: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("GET BOOKING ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load booking",
+    });
+  }
+});
+app.put("/complete-charging/:bookingId", async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    const result = await pool.query(
+      `
+      UPDATE bookings
+      SET
+        booking_status = 'Completed',
+        charging_end_time = CASE
+          WHEN booking_status = 'Charging'
+          THEN LEAST(COALESCE(charging_end_time, NOW()), NOW())
+          ELSE charging_end_time
+        END
+      WHERE id = $1
+      RETURNING *
+      `,
+      [bookingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Charging completed successfully",
+      booking: result.rows[0],
+    });
+  } catch (error) {
+    console.error("COMPLETE CHARGING ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to complete charging",
+    });
   }
 });
 
