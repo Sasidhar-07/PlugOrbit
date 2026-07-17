@@ -34,7 +34,11 @@ app.get("/", (req, res) => {
 
 /* ================= BOOKINGS ================= */
 
-app.post("/book-slot", async (req, res) => {
+/* ================= VERIFY PAYMENT AND CREATE BOOKING ================= */
+
+app.post("/verify-payment-and-book", async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const {
       userId,
@@ -44,10 +48,9 @@ app.post("/book-slot", async (req, res) => {
       time,
       vehicle,
       duration,
-      paymentId,
-      orderId,
-      paymentStatus,
-      amountPaid,
+      razorpayPaymentId,
+      razorpayOrderId,
+      razorpaySignature,
     } = req.body;
 
     if (
@@ -58,63 +61,186 @@ app.post("/book-slot", async (req, res) => {
       !time ||
       !vehicle ||
       !duration ||
-      !paymentId ||
-      !orderId ||
-      !amountPaid
+      !razorpayPaymentId ||
+      !razorpayOrderId ||
+      !razorpaySignature
     ) {
       return res.status(400).json({
         success: false,
-        message: "Missing booking or payment details",
+        message: "Missing payment or booking details",
       });
     }
 
-    const numericAmount = Number(amountPaid);
+    const numericDuration = Number(duration);
+    const expectedAmount = SLOT_PRICES[numericDuration];
 
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    if (!expectedAmount) {
       return res.status(400).json({
         success: false,
-        message: "Invalid payment amount",
+        message: "Invalid charging duration",
       });
     }
 
-    const normalizedPaymentStatus = String(
-      paymentStatus || ""
-    ).toLowerCase();
+    /*
+      1. Verify Razorpay signature.
 
-    if (normalizedPaymentStatus !== "success") {
+      Razorpay signature formula:
+      HMAC_SHA256(orderId + "|" + paymentId, keySecret)
+    */
+    const generatedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .digest("hex");
+
+    const receivedBuffer = Buffer.from(
+      String(razorpaySignature),
+      "utf8"
+    );
+
+    const generatedBuffer = Buffer.from(
+      generatedSignature,
+      "utf8"
+    );
+
+    const signatureIsValid =
+      receivedBuffer.length === generatedBuffer.length &&
+      crypto.timingSafeEqual(
+        receivedBuffer,
+        generatedBuffer
+      );
+
+    if (!signatureIsValid) {
       return res.status(400).json({
         success: false,
-        message: "Payment is not successful",
+        message: "Payment verification failed",
       });
     }
 
-    const existingSlot = await pool.query(
+    /*
+      2. Fetch the Razorpay order from Razorpay itself.
+
+      This prevents the phone from changing the amount.
+    */
+    const razorpayOrder = await razorpay.orders.fetch(
+      razorpayOrderId
+    );
+
+    if (!razorpayOrder) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment order was not found",
+      });
+    }
+
+    const expectedAmountInPaise = expectedAmount * 100;
+
+    if (
+      Number(razorpayOrder.amount) !== expectedAmountInPaise ||
+      razorpayOrder.currency !== "INR"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment amount does not match booking price",
+      });
+    }
+
+    /*
+      3. Fetch and verify the payment status.
+    */
+    const razorpayPayment = await razorpay.payments.fetch(
+      razorpayPaymentId
+    );
+
+    if (!razorpayPayment) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment was not found",
+      });
+    }
+
+    if (
+      razorpayPayment.order_id !== razorpayOrderId ||
+      Number(razorpayPayment.amount) !== expectedAmountInPaise ||
+      razorpayPayment.currency !== "INR"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment details do not match the order",
+      });
+    }
+
+    if (razorpayPayment.status !== "captured") {
+      return res.status(400).json({
+        success: false,
+        message: `Payment is ${razorpayPayment.status}, not captured`,
+      });
+    }
+
+    await client.query("BEGIN");
+
+    /*
+      4. Prevent the same Razorpay payment from creating
+         multiple bookings.
+    */
+    const duplicatePayment = await client.query(
       `SELECT id
        FROM bookings
-       WHERE station_id = $1
+       WHERE payment_id = $1
+          OR order_id = $2
+       LIMIT 1`,
+      [razorpayPaymentId, razorpayOrderId]
+    );
+
+    if (duplicatePayment.rows.length > 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        success: false,
+        message: "This payment has already been used",
+      });
+    }
+
+    /*
+      5. Lock and verify the slot inside the transaction.
+    */
+    const existingSlot = await client.query(
+      `SELECT id
+       FROM bookings
+       WHERE station_id::text = $1::text
          AND date = $2
          AND time = $3
          AND booking_status IN ('Booked', 'Charging')
-       LIMIT 1`,
-      [stationId, date, time]
+       FOR UPDATE`,
+      [String(stationId), date, time]
     );
 
     if (existingSlot.rows.length > 0) {
+      await client.query("ROLLBACK");
+
       return res.status(409).json({
         success: false,
-        message: "This slot is already booked",
+        message:
+          "This slot was booked by another customer. Contact support for a refund.",
       });
     }
 
+    /*
+      6. Calculate marketplace split.
+    */
     const commissionRate = 0.1;
+
     const platformCommission = Number(
-      (numericAmount * commissionRate).toFixed(2)
-    );
-    const ownerAmount = Number(
-      (numericAmount - platformCommission).toFixed(2)
+      (expectedAmount * commissionRate).toFixed(2)
     );
 
-    const result = await pool.query(
+    const ownerAmount = Number(
+      (expectedAmount - platformCommission).toFixed(2)
+    );
+
+    /*
+      7. Create booking only after all verification passes.
+    */
+    const bookingResult = await client.query(
       `INSERT INTO bookings (
         user_id,
         station_id,
@@ -133,45 +259,54 @@ app.post("/book-slot", async (req, res) => {
         price_per_unit
       )
       VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-        'Booked',$11,$12,$13,$14
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,
+        'success','Booked',$10,$11,$12,$13
       )
       RETURNING *`,
       [
         userId,
-        stationId,
+        String(stationId),
         stationName,
         date,
         time,
-        vehicle,
-        Number(duration),
-        paymentId,
-        orderId,
-        "success",
-        numericAmount,
+        vehicle.trim(),
+        numericDuration,
+        razorpayPaymentId,
+        razorpayOrderId,
+        expectedAmount,
         platformCommission,
         ownerAmount,
-        numericAmount,
+        0,
       ]
     );
 
+    await client.query("COMMIT");
+
     return res.status(201).json({
       success: true,
-      message: "Booking confirmed",
-      booking: result.rows[0],
+      message: "Payment verified and booking confirmed",
+      booking: bookingResult.rows[0],
       payment: {
-        amount_paid: numericAmount,
-        platform_commission: platformCommission,
-        owner_amount: ownerAmount,
+        amountPaid: expectedAmount,
+        platformCommission,
+        ownerAmount,
       },
     });
   } catch (error) {
-    console.error("BOOK SLOT ERROR:", error);
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("ROLLBACK ERROR:", rollbackError);
+    }
+
+    console.error("VERIFY PAYMENT AND BOOK ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message: error.message || "Booking failed",
+      message: "Could not verify payment and create booking",
     });
+  } finally {
+    client.release();
   }
 });
 
@@ -206,20 +341,53 @@ app.delete("/cancel-booking/:id", async (req, res) => {
 });
 
 /* ================= RAZORPAY ORDER ================= */
+/* ================= SECURE RAZORPAY ORDER ================= */
+
+const SLOT_PRICES = {
+  30: 120,
+  60: 220,
+  120: 400,
+};
 
 app.post("/create-order", async (req, res) => {
   try {
-    const { amount } = req.body;
+    const { duration } = req.body;
+
+    const numericDuration = Number(duration);
+    const amount = SLOT_PRICES[numericDuration];
+
+    if (!amount) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid charging duration",
+      });
+    }
 
     const order = await razorpay.orders.create({
-      amount: amount * 100,
+      amount: amount * 100, // Razorpay uses paise
       currency: "INR",
-      receipt: `receipt_${Date.now()}`,
+      receipt: `plug_${Date.now()}`,
+      notes: {
+        duration: String(numericDuration),
+        amount_rupees: String(amount),
+      },
     });
 
-    res.json(order);
-  } catch (err) {
-    res.status(500).json({ message: "Order failed" });
+    return res.status(201).json({
+      success: true,
+      order: {
+        id: order.id,
+        amount: order.amount,
+        currency: order.currency,
+      },
+    });
+  } catch (error) {
+    console.error("CREATE ORDER ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Could not create payment order",
+    });
   }
 });
 
