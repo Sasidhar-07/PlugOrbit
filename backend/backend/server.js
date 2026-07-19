@@ -506,13 +506,40 @@ app.post("/start-charging/:bookingId", async (req, res) => {
     });
   }
 });
+/* ================= COMPLETE CHARGING (ONLY ONE) ================= */
 
+// Get one booking and return all charging-summary details
 app.get("/booking/:bookingId", async (req, res) => {
   try {
     const { bookingId } = req.params;
 
     let result = await pool.query(
-      `SELECT * FROM bookings WHERE id = $1`,
+      `
+      SELECT
+        id,
+        user_id,
+        station_id,
+        station_name,
+        date,
+        time,
+        vehicle,
+        duration,
+        payment_id,
+        order_id,
+        payment_status,
+        booking_status,
+        charging_start_time,
+        charging_end_time,
+        charging_status,
+        created_at,
+        amount_paid,
+        platform_commission,
+        owner_amount,
+        units_consumed,
+        price_per_unit
+      FROM bookings
+      WHERE id = $1
+      `,
       [bookingId]
     );
 
@@ -525,19 +552,42 @@ app.get("/booking/:bookingId", async (req, res) => {
 
     let booking = result.rows[0];
 
-    // Automatically complete an expired charging session
-    // whenever the booking is fetched.
+    // Automatically mark the charging session as completed
+    // when its charging end time has passed.
     if (
-      booking.booking_status === "Charging" &&
+      String(booking.booking_status || "").toLowerCase() === "charging" &&
       booking.charging_end_time &&
       new Date(booking.charging_end_time).getTime() <= Date.now()
     ) {
       result = await pool.query(
         `
         UPDATE bookings
-        SET booking_status = 'Completed'
+        SET
+          booking_status = 'Completed',
+          charging_status = 'completed'
         WHERE id = $1
-        RETURNING *
+        RETURNING
+          id,
+          user_id,
+          station_id,
+          station_name,
+          date,
+          time,
+          vehicle,
+          duration,
+          payment_id,
+          order_id,
+          payment_status,
+          booking_status,
+          charging_start_time,
+          charging_end_time,
+          charging_status,
+          created_at,
+          amount_paid,
+          platform_commission,
+          owner_amount,
+          units_consumed,
+          price_per_unit
         `,
         [bookingId]
       );
@@ -559,6 +609,9 @@ app.get("/booking/:bookingId", async (req, res) => {
     });
   }
 });
+
+
+// Complete a charging session
 app.put("/complete-charging/:bookingId", async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -568,13 +621,39 @@ app.put("/complete-charging/:bookingId", async (req, res) => {
       UPDATE bookings
       SET
         booking_status = 'Completed',
+
+        charging_status = 'completed',
+
         charging_end_time = CASE
           WHEN booking_status = 'Charging'
           THEN LEAST(COALESCE(charging_end_time, NOW()), NOW())
           ELSE charging_end_time
         END
+
       WHERE id = $1
-      RETURNING *
+
+      RETURNING
+        id,
+        user_id,
+        station_id,
+        station_name,
+        date,
+        time,
+        vehicle,
+        duration,
+        payment_id,
+        order_id,
+        payment_status,
+        booking_status,
+        charging_start_time,
+        charging_end_time,
+        charging_status,
+        created_at,
+        amount_paid,
+        platform_commission,
+        owner_amount,
+        units_consumed,
+        price_per_unit
       `,
       [bookingId]
     );
@@ -590,6 +669,7 @@ app.put("/complete-charging/:bookingId", async (req, res) => {
       success: true,
       message: "Charging completed successfully",
       booking: result.rows[0],
+      serverTime: new Date().toISOString(),
     });
   } catch (error) {
     console.error("COMPLETE CHARGING ERROR:", error);
