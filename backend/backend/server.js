@@ -756,35 +756,7 @@ app.post("/save-push-token", async (req, res) => {
   }
 });
 
-app.get("/booking/:bookingId", async (req, res) => {
-  try {
-    const { bookingId } = req.params;
 
-    const result = await pool.query(
-      "SELECT * FROM bookings WHERE id = $1",
-      [bookingId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      booking: result.rows[0],
-    });
-  } catch (error) {
-    console.error("BOOKING FETCH ERROR:", error);
-
-    res.status(500).json({
-      success: false,
-      message: "Could not fetch booking",
-    });
-  }
-});
 /* ================= OWNER DASHBOARD ================= */
 
 app.get("/owner/stations/:ownerId", async (req, res) => {
@@ -1095,6 +1067,94 @@ app.put("/admin/reject-station/:id", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Could not reject station",
+    });
+  }
+});
+// ===========================
+// SUBMIT REVIEW
+// ===========================
+app.post("/reviews", async (req, res) => {
+  try {
+    const {
+      booking_id,
+      station_id,
+      user_id,
+      rating,
+      review,
+    } = req.body;
+
+    // Basic validation
+    if (
+      !booking_id ||
+      !station_id ||
+      !user_id ||
+      !rating
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
+    }
+
+    if (rating < 1 || rating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Rating must be between 1 and 5",
+      });
+    }
+
+    // Prevent duplicate review
+    const existingReview = await pool.query(
+      `
+      SELECT id
+      FROM reviews
+      WHERE booking_id = $1
+      `,
+      [booking_id]
+    );
+
+    if (existingReview.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Review already submitted",
+      });
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO reviews
+      (
+        booking_id,
+        station_id,
+        user_id,
+        rating,
+        review
+      )
+      VALUES
+      ($1,$2,$3,$4,$5)
+      RETURNING *
+      `,
+      [
+        booking_id,
+        station_id,
+        user_id,
+        rating,
+        review || "",
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "Review submitted successfully",
+      review: result.rows[0],
+    });
+
+  } catch (error) {
+    console.error("SUBMIT REVIEW ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error",
     });
   }
 });
