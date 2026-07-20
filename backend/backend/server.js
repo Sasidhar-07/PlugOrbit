@@ -316,14 +316,56 @@ app.post("/verify-payment-and-book", async (req, res) => {
 
 app.get("/my-bookings/:userId", async (req, res) => {
   try {
+
+    const userId = req.params.userId;
+
+
+    // Get bookings
     const result = await pool.query(
-      `SELECT * FROM bookings WHERE user_id=$1 ORDER BY created_at DESC`,
-      [req.params.userId]
+      `
+      SELECT *
+      FROM bookings
+      WHERE user_id=$1
+      ORDER BY created_at DESC
+      `,
+      [userId]
     );
 
-    res.json(result.rows);
+
+    // Get already reviewed bookings
+    const reviewsResult = await pool.query(
+      `
+      SELECT booking_id
+      FROM reviews
+      WHERE user_id=$1
+      `,
+      [userId]
+    );
+
+
+    const reviewedBookings = reviewsResult.rows.map(
+      (row) => row.booking_id
+    );
+
+
+    const bookingsWithReviewStatus =
+      result.rows.map((booking) => ({
+        ...booking,
+        has_review: reviewedBookings.includes(booking.id)
+      }));
+
+
+    res.json(bookingsWithReviewStatus);
+
+
   } catch (err) {
-    res.status(500).json({ message: "Error fetching history" });
+
+    console.log("HISTORY ERROR:", err);
+
+    res.status(500).json({
+      message: "Error fetching history"
+    });
+
   }
 });
 
