@@ -1207,6 +1207,110 @@ review
     });
   }
 });
+// ================= OWNER DASHBOARD =================
+
+app.get("/owner-dashboard/:ownerId", async (req,res)=>{
+
+    try{
+
+        const ownerId = req.params.ownerId;
+
+
+        // stations owned by owner
+        const stations = await pool.query(
+            `
+            SELECT *
+            FROM stations
+            WHERE owner_id=$1
+            `,
+            [ownerId]
+        );
+
+
+        const stationIds = stations.rows.map(
+            station=>station.id
+        );
+
+
+        if(stationIds.length===0){
+            return res.json({
+                message:"No stations found"
+            });
+        }
+
+
+
+        const bookings = await pool.query(
+            `
+            SELECT *
+            FROM bookings
+            WHERE station_id = ANY($1)
+            ORDER BY created_at DESC
+            `,
+            [stationIds]
+        );
+
+
+
+        const revenue = bookings.rows.reduce(
+            (sum,item)=>sum + Number(item.owner_amount || 0),
+            0
+        );
+
+
+        const reviews = await pool.query(
+            `
+            SELECT AVG(rating) as average,
+            COUNT(*) as total
+            FROM reviews
+            WHERE station_id = ANY($1)
+            `,
+            [stationIds]
+        );
+
+
+
+        res.json({
+
+            stations: stations.rows,
+
+            total_stations:
+            stations.rows.length,
+
+
+            total_bookings:
+            bookings.rows.length,
+
+
+            revenue: revenue,
+
+
+            average_rating:
+            reviews.rows[0].average || 0,
+
+
+            total_reviews:
+            reviews.rows[0].total || 0,
+
+
+            recent_bookings:
+            bookings.rows.slice(0,5)
+
+        });
+
+
+    }
+    catch(error){
+
+        console.log(error);
+
+        res.status(500).json({
+            message:"Dashboard error"
+        });
+
+    }
+
+});
 /* ================= START SERVER ================= */
 
 app.listen(PORT, "0.0.0.0", () => {
