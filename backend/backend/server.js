@@ -10,6 +10,8 @@ const crypto = require("crypto");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Middleware
 app.use(cors());
@@ -1073,15 +1075,20 @@ app.put("/admin/reject-station/:id", async (req, res) => {
 // ===========================
 // SUBMIT REVIEW
 // ===========================
-app.post("/reviews", async (req, res) => {
-  try {
-    const {
-      booking_id,
-      station_id,
-      user_id,
-      rating,
-      review,
-    } = req.body;
+app.post("/reviews", async (req,res)=>{
+
+try {
+
+console.log("REVIEW BODY:", req.body);
+
+
+const {
+booking_id,
+station_id,
+user_id,
+rating,
+review
+} = req.body || {};
 
     // Basic validation
     if (
