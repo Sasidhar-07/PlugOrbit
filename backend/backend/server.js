@@ -1116,45 +1116,32 @@ app.put("/admin/reject-station/:id", async (req, res) => {
 });
 // GET ALL CUSTOMER BOOKINGS FOR ADMIN
 
-app.get("/admin/bookings", async (req, res) => {
+
+app.get("/admin/bookings", async (req,res)=>{
 
   try {
 
-    const result = await pool.query(
-      `
+    const result = await pool.query(`
       SELECT
-        bookings.id,
-
-        users.name AS customer_name,
-        users.email AS customer_email,
-
-        stations.name AS station_name,
-
-        bookings.vehicle,
-        bookings.time,
-
-        bookings.payment_status,
-        bookings.booking_status
-
+        id,
+        station_name,
+        vehicle,
+        time,
+        payment_status,
+        booking_status,
+        date,
+        duration
       FROM bookings
+      ORDER BY id DESC
+    `);
 
-      LEFT JOIN users
-      ON bookings.user_id = users.id
-
-      LEFT JOIN stations
-      ON bookings.station_id = stations.id
-
-      ORDER BY bookings.id DESC
-      `
-    );
-
+    console.log("BOOKINGS:", result.rows);
 
     res.json(result.rows);
 
-
   } catch(error){
 
-    console.log(error);
+    console.log("BOOKING ERROR:", error.message);
 
     res.status(500).json({
       message:"Could not fetch bookings"
