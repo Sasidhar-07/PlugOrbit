@@ -1468,6 +1468,328 @@ message:"Could not delete station"
 }
 
 });
+// UPDATE STATION BY OWNER
+app.put("/owner/update-station/:id", async (req,res)=>{
+  try{
+
+    const {
+      name,
+      address,
+      chargerType,
+      pricePerKwh,
+      totalSlots
+    } = req.body;
+
+
+    const result = await pool.query(
+      `
+      UPDATE stations
+      SET
+      name=$1,
+      address=$2,
+      charger_type=$3,
+      price_per_kwh=$4,
+      total_slots=$5
+      WHERE id=$6
+      RETURNING *
+      `,
+      [
+        name,
+        address,
+        chargerType,
+        pricePerKwh,
+        totalSlots,
+        req.params.id
+      ]
+    );
+
+
+    res.json({
+      message:"Station updated successfully",
+      station:result.rows[0]
+    });
+
+
+  }catch(error){
+
+    console.log(error);
+
+    res.status(500).json({
+      message:"Update failed"
+    });
+
+  }
+});
+// DELETE STATION BY OWNER
+app.delete("/owner/delete-station/:id", async (req,res)=>{
+
+  try {
+
+    const stationId = req.params.id;
+
+    const result = await pool.query(
+      `
+      DELETE FROM stations
+      WHERE id=$1
+      RETURNING *
+      `,
+      [stationId]
+    );
+
+
+    if(result.rows.length === 0){
+      return res.status(404).json({
+        message:"Station not found"
+      });
+    }
+
+
+    res.json({
+      message:"Station deleted successfully",
+      station:result.rows[0]
+    });
+
+
+  } catch(error){
+
+    console.log("DELETE STATION ERROR:", error);
+
+    res.status(500).json({
+      message:"Delete failed"
+    });
+
+  }
+
+});
+// GET PENDING STATIONS FOR ADMIN
+
+app.get("/admin/pending-stations", async(req,res)=>{
+  try{
+
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM stations
+      WHERE approval_status='Pending'
+      ORDER BY id DESC
+      `
+    );
+
+    res.json(result.rows);
+
+  }catch(error){
+
+    console.log(error);
+
+    res.status(500).json({
+      message:"Could not fetch pending stations"
+    });
+
+  }
+});
+
+
+
+// APPROVE STATION
+
+app.put("/admin/approve-station/:id", async(req,res)=>{
+
+try{
+
+ const result = await pool.query(
+ `
+ UPDATE stations
+ SET approval_status='Approved'
+ WHERE id=$1
+ RETURNING *
+ `,
+ [req.params.id]
+ );
+
+
+ res.json({
+   message:"Station approved successfully",
+   station:result.rows[0]
+ });
+
+
+}catch(error){
+
+console.log(error);
+
+res.status(500).json({
+ message:"Approval failed"
+});
+
+}
+
+});
+
+
+
+// REJECT STATION
+
+app.put("/admin/reject-station/:id", async(req,res)=>{
+
+try{
+
+ const result = await pool.query(
+ `
+ UPDATE stations
+ SET approval_status='Rejected'
+ WHERE id=$1
+ RETURNING *
+ `,
+ [req.params.id]
+ );
+
+
+ res.json({
+   message:"Station rejected",
+   station:result.rows[0]
+ });
+
+
+}catch(error){
+
+console.log(error);
+
+res.status(500).json({
+ message:"Reject failed"
+});
+
+}
+
+});
+// ================= ADMIN STATION APPROVAL =================
+
+
+// GET PENDING STATIONS
+
+app.get("/admin/pending-stations", async(req,res)=>{
+
+try{
+
+const result = await pool.query(
+`
+SELECT *
+FROM stations
+WHERE approval_status='Pending'
+ORDER BY id DESC
+`
+);
+
+res.json(result.rows);
+
+
+}catch(error){
+
+console.log(error);
+
+res.status(500).json({
+message:"Could not fetch pending stations"
+});
+
+}
+
+});
+
+
+
+
+// APPROVE STATION
+
+app.put("/admin/approve-station/:id", async(req,res)=>{
+
+try{
+
+
+const result = await pool.query(
+
+`
+UPDATE stations
+SET approval_status='Approved'
+WHERE id=$1
+RETURNING *
+`,
+
+[req.params.id]
+
+);
+
+
+res.json({
+
+message:"Station approved successfully",
+
+station:result.rows[0]
+
+});
+
+
+}catch(error){
+
+console.log(error);
+
+res.status(500).json({
+
+message:"Approval failed"
+
+});
+
+}
+
+});
+
+
+
+
+// REJECT STATION
+
+app.put("/admin/reject-station/:id", async(req,res)=>{
+
+
+try{
+
+
+const result = await pool.query(
+
+`
+UPDATE stations
+SET approval_status='Rejected'
+WHERE id=$1
+RETURNING *
+`,
+
+[req.params.id]
+
+);
+
+
+res.json({
+
+message:"Station rejected",
+
+station:result.rows[0]
+
+});
+
+
+}catch(error){
+
+console.log(error);
+
+
+res.status(500).json({
+
+message:"Reject failed"
+
+});
+
+
+}
+
+});
 /* ================= START SERVER ================= */
 
 app.listen(PORT, "0.0.0.0", () => {
