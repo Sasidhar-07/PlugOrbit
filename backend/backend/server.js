@@ -1114,6 +1114,55 @@ app.put("/admin/reject-station/:id", async (req, res) => {
     });
   }
 });
+// GET ALL CUSTOMER BOOKINGS FOR ADMIN
+
+app.get("/admin/bookings", async (req, res) => {
+
+  try {
+
+    const result = await pool.query(
+      `
+      SELECT
+        bookings.id,
+
+        users.name AS customer_name,
+        users.email AS customer_email,
+
+        stations.name AS station_name,
+
+        bookings.vehicle,
+        bookings.time,
+
+        bookings.payment_status,
+        bookings.booking_status
+
+      FROM bookings
+
+      LEFT JOIN users
+      ON bookings.user_id = users.id
+
+      LEFT JOIN stations
+      ON bookings.station_id = stations.id
+
+      ORDER BY bookings.id DESC
+      `
+    );
+
+
+    res.json(result.rows);
+
+
+  } catch(error){
+
+    console.log(error);
+
+    res.status(500).json({
+      message:"Could not fetch bookings"
+    });
+
+  }
+
+});
 // ===========================
 // SUBMIT REVIEW
 // ===========================
@@ -1567,13 +1616,22 @@ app.get("/admin/pending-stations", async(req,res)=>{
   try{
 
     const result = await pool.query(
-      `
-      SELECT *
-      FROM stations
-      WHERE approval_status='Pending'
-      ORDER BY id DESC
-      `
-    );
+`
+SELECT 
+stations.*,
+users.name AS owner_name,
+users.email AS owner_email
+
+FROM stations
+
+LEFT JOIN users
+ON stations.owner_id = users.id
+
+WHERE stations.approval_status='Pending'
+
+ORDER BY stations.id DESC
+`
+);
 
     res.json(result.rows);
 
