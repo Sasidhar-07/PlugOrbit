@@ -1311,6 +1311,69 @@ app.get("/owner-dashboard/:ownerId", async (req,res)=>{
     }
 
 });
+// ADD NEW STATION BY OWNER
+app.post("/owner/add-station", async (req, res) => {
+  try {
+
+    const {
+      ownerId,
+      name,
+      address,
+      latitude,
+      longitude,
+      chargerType,
+      pricePerKwh,
+      totalSlots
+    } = req.body;
+
+
+    const result = await pool.query(
+      `
+      INSERT INTO stations
+      (
+        owner_id,
+        name,
+        address,
+        latitude,
+        longitude,
+        charger_type,
+        price_per_kwh,
+        total_slots,
+        approval_status
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,'Approved')
+      RETURNING *
+      `,
+      [
+        ownerId,
+        name,
+        address,
+        latitude,
+        longitude,
+        chargerType,
+        pricePerKwh,
+        totalSlots
+      ]
+    );
+
+
+    res.json({
+      message:"Station added successfully",
+      station:result.rows[0]
+    });
+
+
+  } catch(error){
+
+    console.log("ADD STATION ERROR:",error);
+
+    res.status(500).json({
+      message:"Could not add station"
+    });
+
+  }
+});
 /* ================= START SERVER ================= */
 
 app.listen(PORT, "0.0.0.0", () => {
