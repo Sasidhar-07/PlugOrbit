@@ -1374,6 +1374,100 @@ app.post("/owner/add-station", async (req, res) => {
 
   }
 });
+// UPDATE OWNER STATION
+app.put("/owner/update-station/:id", async (req,res)=>{
+
+  try {
+
+    const stationId = req.params.id;
+
+    const {
+      name,
+      address,
+      latitude,
+      longitude,
+      chargerType,
+      pricePerKwh,
+      totalSlots
+    } = req.body;
+
+
+    const result = await pool.query(
+      `
+      UPDATE stations
+      SET
+      name=$1,
+      address=$2,
+      latitude=$3,
+      longitude=$4,
+      charger_type=$5,
+      price_per_kwh=$6,
+      total_slots=$7
+
+      WHERE id=$8
+
+      RETURNING *
+      `,
+      [
+        name,
+        address,
+        latitude,
+        longitude,
+        chargerType,
+        pricePerKwh,
+        totalSlots,
+        stationId
+      ]
+    );
+
+
+    res.json({
+      message:"Station updated successfully",
+      station:result.rows[0]
+    });
+
+
+  } catch(error){
+
+    console.log("UPDATE STATION ERROR:",error);
+
+    res.status(500).json({
+      message:"Could not update station"
+    });
+
+  }
+
+});
+// DELETE OWNER STATION
+app.delete("/owner/delete-station/:id", async(req,res)=>{
+
+try{
+
+const stationId=req.params.id;
+
+
+await pool.query(
+"DELETE FROM stations WHERE id=$1",
+[stationId]
+);
+
+
+res.json({
+message:"Station deleted successfully"
+});
+
+
+}catch(error){
+
+console.log("DELETE ERROR:",error);
+
+res.status(500).json({
+message:"Could not delete station"
+});
+
+}
+
+});
 /* ================= START SERVER ================= */
 
 app.listen(PORT, "0.0.0.0", () => {
