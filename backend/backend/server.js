@@ -314,61 +314,58 @@ app.post("/verify-payment-and-book", async (req, res) => {
 
 /* ================= HISTORY ================= */
 
-app.get("/my-bookings/:userId", async (req, res) => {
-  try {
+app.get("/my-bookings/:id", async(req,res)=>{
 
-    const userId = req.params.userId;
+try {
 
+const userId = req.params.id;
 
-    // Get bookings
-    const result = await pool.query(
-      `
-      SELECT *
-      FROM bookings
-      WHERE user_id=$1
-      ORDER BY created_at DESC
-      `,
-      [userId]
-    );
+const result = await pool.query(
+`
+SELECT 
+b.*,
 
+CASE 
+WHEN r.id IS NOT NULL 
+THEN true
+ELSE false
+END AS has_review,
 
-    // Get already reviewed bookings
-    const reviewsResult = await pool.query(
-      `
-      SELECT booking_id
-      FROM reviews
-      WHERE user_id=$1
-      `,
-      [userId]
-    );
+r.rating,
+r.review
 
+FROM bookings b
 
-    const reviewedBookings = reviewsResult.rows.map(
-      (row) => row.booking_id
-    );
+LEFT JOIN reviews r
+ON r.booking_id = b.id
 
+WHERE b.user_id=$1
 
-    const bookingsWithReviewStatus =
-      result.rows.map((booking) => ({
-        ...booking,
-        has_review: reviewedBookings.includes(booking.id)
-      }));
+ORDER BY b.id DESC
+`,
+[userId]
+);
 
 
-    res.json(bookingsWithReviewStatus);
+console.log("HISTORY DATA:");
+console.log(result.rows);
 
 
-  } catch (err) {
+res.json(result.rows);
 
-    console.log("HISTORY ERROR:", err);
 
-    res.status(500).json({
-      message: "Error fetching history"
-    });
+}
+catch(error){
 
-  }
+console.log(error);
+
+res.status(500).json({
+message:"Could not fetch bookings"
 });
 
+}
+
+});
 /* ================= CANCEL ================= */
 
 app.delete("/cancel-booking/:id", async (req, res) => {
@@ -656,73 +653,82 @@ app.get("/booking/:bookingId", async (req, res) => {
 
 
 // Complete a charging session
-app.put("/complete-charging/:bookingId", async (req, res) => {
-  try {
-    const { bookingId } = req.params;
+app.put("/complete-charging/:bookingId", async (req,res)=>{
 
-    const result = await pool.query(
-      `
-      UPDATE bookings
-      SET
-        booking_status = 'Completed',
+try{
 
-        charging_status = 'completed',
+const {bookingId}=req.params;
 
-        charging_end_time = CASE
-          WHEN booking_status = 'Charging'
-          THEN LEAST(COALESCE(charging_end_time, NOW()), NOW())
-          ELSE charging_end_time
-        END
 
-      WHERE id = $1
+const result = await pool.query(
 
-      RETURNING
-        id,
-        user_id,
-        station_id,
-        station_name,
-        date,
-        time,
-        vehicle,
-        duration,
-        payment_id,
-        order_id,
-        payment_status,
-        booking_status,
-        charging_start_time,
-        charging_end_time,
-        charging_status,
-        created_at,
-        amount_paid,
-        platform_commission,
-        owner_amount,
-        units_consumed,
-        price_per_unit
-      `,
-      [bookingId]
-    );
+`
+UPDATE bookings
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-      });
-    }
+SET
 
-    return res.json({
-      success: true,
-      message: "Charging completed successfully",
-      booking: result.rows[0],
-      serverTime: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("COMPLETE CHARGING ERROR:", error);
+booking_status='Completed',
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to complete charging",
-    });
-  }
+charging_status='completed',
+
+charging_end_time=NOW()
+
+WHERE id=$1
+
+RETURNING *
+
+`,
+
+[bookingId]
+
+);
+
+
+
+if(result.rows.length===0){
+
+return res.status(404).json({
+
+success:false,
+
+message:"Booking not found"
+
+});
+
+}
+
+
+
+res.json({
+
+success:true,
+
+message:"Charging completed successfully",
+
+booking:result.rows[0]
+
+});
+
+
+}
+
+catch(error){
+
+console.log(error);
+
+
+res.status(500).json({
+
+success:false,
+
+message:"Failed"
+
+});
+
+
+}
+
+
 });
 
 /* ================= STATIONS ================= */
