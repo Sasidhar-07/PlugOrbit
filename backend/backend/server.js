@@ -320,26 +320,28 @@ try {
 
 const userId = req.params.id;
 
+
 const result = await pool.query(
 `
-SELECT 
+SELECT
 b.*,
 
 CASE 
-WHEN r.id IS NOT NULL 
-THEN true
+WHEN r.id IS NOT NULL THEN true
 ELSE false
 END AS has_review,
 
-r.rating,
-r.review
+r.id AS review_id,
+COALESCE(r.rating,0) AS rating,
+COALESCE(r.review,'') AS review
 
 FROM bookings b
 
 LEFT JOIN reviews r
 ON r.booking_id = b.id
+AND r.user_id = b.user_id
 
-WHERE b.user_id=$1
+WHERE b.user_id = $1
 
 ORDER BY b.id DESC
 `,
@@ -347,11 +349,20 @@ ORDER BY b.id DESC
 );
 
 
-console.log("HISTORY DATA:");
-console.log(result.rows);
+console.log("HISTORY DATA");
+console.log(JSON.stringify(result.rows,null,2));
 
-
-res.json(result.rows);
+console.log(
+"FINAL RESPONSE",
+JSON.stringify(result.rows, null, 2)
+);
+res.json(
+ result.rows.map(row => ({
+   ...row,
+   rating: row.rating ?? null,
+   review: row.review ?? null
+ }))
+);
 
 
 }
@@ -362,6 +373,72 @@ console.log(error);
 res.status(500).json({
 message:"Could not fetch bookings"
 });
+
+}
+
+});
+// GET SINGLE BOOKING FOR QR
+
+app.get("/booking/:id", async(req,res)=>{
+
+try{
+
+const bookingId = req.params.id;
+
+
+const result = await pool.query(
+
+`
+SELECT
+
+b.*,
+
+s.name AS station_name
+
+FROM bookings b
+
+LEFT JOIN stations s
+
+ON s.id=b.station_id
+
+
+WHERE b.id=$1
+
+`,
+[bookingId]
+
+);
+
+
+
+if(result.rows.length === 0){
+
+return res.status(404).json({
+
+message:"Booking not found"
+
+});
+
+}
+
+
+
+res.json(result.rows[0]);
+
+
+}
+
+catch(error){
+
+console.log("BOOKING FETCH ERROR:",error);
+
+
+res.status(500).json({
+
+message:"Server error"
+
+});
+
 
 }
 
@@ -460,92 +537,127 @@ app.post("/verify-qr", async (req, res) => {
 });
 
 /* ================= START CHARGING ================= */
+app.post("/start-charging/:bookingId", async (req,res)=>{
 
-app.post("/start-charging/:bookingId", async (req, res) => {
-  try {
-    const { bookingId } = req.params;
+try{
 
-    const bookingResult = await pool.query(
-      `SELECT * FROM bookings WHERE id = $1`,
-      [bookingId]
-    );
+const {bookingId}=req.params;
 
-    if (bookingResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-      });
-    }
 
-    const booking = bookingResult.rows[0];
+// get booking
+const bookingResult = await pool.query(
+`
+SELECT *
+FROM bookings
+WHERE id=$1
+`,
+[bookingId]
+);
 
-    if (booking.payment_status !== "success") {
-      return res.status(400).json({
-        success: false,
-        message: "Payment is not completed",
-      });
-    }
 
-    if (booking.booking_status === "Completed") {
-      return res.status(400).json({
-        success: false,
-        message: "This charging session is already completed",
-      });
-    }
+if(bookingResult.rows.length===0){
 
-    // Prevent scanning the same QR from restarting the timer.
-    if (
-      booking.booking_status === "Charging" &&
-      booking.charging_start_time &&
-      booking.charging_end_time
-    ) {
-      return res.json({
-        success: true,
-        message: "Charging is already active",
-        booking,
-      });
-    }
+return res.status(404).json({
+success:false,
+message:"Booking not found"
+});
 
-    const duration = Number(booking.duration);
+}
 
-    if (![30, 60, 120].includes(duration)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid charging duration",
-      });
-    }
 
-    const startTime = new Date();
-    const endTime = new Date(
-      startTime.getTime() + duration * 60 * 1000
-    );
+const booking = bookingResult.rows[0];
 
-    const result = await pool.query(
-      `
-      UPDATE bookings
-      SET
-        booking_status = 'Charging',
-        charging_start_time = $1,
-        charging_end_time = $2
-      WHERE id = $3
-      RETURNING *
-      `,
-      [startTime, endTime, bookingId]
-    );
 
-    return res.json({
-      success: true,
-      message: "Charging started",
-      booking: result.rows[0],
-    });
-  } catch (error) {
-    console.error("START CHARGING ERROR:", error);
+// payment check
+if(booking.payment_status !== "success"){
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to start charging",
-    });
-  }
+return res.status(400).json({
+success:false,
+message:"Payment not completed"
+});
+
+}
+
+
+// already completed
+if(booking.booking_status==="Completed"){
+
+return res.status(400).json({
+success:false,
+message:"Already completed"
+});
+
+}
+
+
+
+const duration = Number(booking.duration);
+
+
+const startTime = new Date();
+
+const endTime = new Date(
+startTime.getTime()+duration*60*1000
+);
+
+
+
+const result = await pool.query(
+`
+UPDATE bookings
+
+SET
+
+booking_status='Charging',
+
+charging_status='charging',
+
+charging_start_time=$1,
+
+charging_end_time=$2
+
+WHERE id=$3
+
+RETURNING *
+
+`,
+[
+startTime,
+endTime,
+bookingId
+]
+);
+
+
+
+res.json({
+
+success:true,
+
+message:"Charging started",
+
+booking:result.rows[0]
+
+});
+
+
+}
+catch(error){
+
+console.log("START CHARGING ERROR:",error);
+
+
+res.status(500).json({
+
+success:false,
+
+message:"Failed"
+
+});
+
+
+}
+
 });
 /* ================= COMPLETE CHARGING (ONLY ONE) ================= */
 
@@ -775,6 +887,7 @@ console.log(req.body);
 
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
+  console.log("LOGIN EMAIL RECEIVED:", email);
 
   const user = await pool.query("SELECT * FROM users WHERE email=$1", [email]);
 
