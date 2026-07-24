@@ -385,60 +385,37 @@ try{
 
 const bookingId = req.params.id;
 
-
 const result = await pool.query(
-
 `
-SELECT
-
-b.*,
-
-s.name AS station_name
-
-FROM bookings b
-
-LEFT JOIN stations s
-
-ON s.id=b.station_id
-
-
-WHERE b.id=$1
-
+SELECT *
+FROM bookings
+WHERE id=$1
 `,
 [bookingId]
-
 );
-
 
 
 if(result.rows.length === 0){
 
 return res.status(404).json({
-
 message:"Booking not found"
-
 });
 
 }
-
 
 
 res.json(result.rows[0]);
 
 
 }
-
 catch(error){
 
-console.log("BOOKING FETCH ERROR:",error);
-
+console.log("BOOKING FETCH ERROR:", error);
 
 res.status(500).json({
-
-message:"Server error"
-
+message:"Server error",
+error:error.message
 });
-
 
 }
 
