@@ -216,7 +216,9 @@ message:"No user"
 
 
 const user=result.rows[0];
-
+console.log("LOGIN USER:", user.email);
+console.log("ENTERED PASSWORD:", password);
+console.log("DATABASE HASH:", user.password);
 
 
 const valid =
@@ -1047,6 +1049,215 @@ message:"Could not start charging"
 
 });
 
+app.post(
+"/complete-charging/:bookingId",
+async(req,res)=>{
+
+
+try{
+
+
+const bookingId =
+req.params.bookingId;
+
+
+
+const result =
+await pool.query(
+
+`
+SELECT *
+FROM bookings
+WHERE id=$1
+`,
+[
+bookingId
+]
+
+);
+
+
+
+if(result.rows.length===0)
+
+return res.status(404).json({
+
+success:false,
+
+message:"Booking not found"
+
+});
+
+
+
+const booking =
+result.rows[0];
+
+
+
+// check charging status
+
+if(
+booking.booking_status !== "Charging"
+)
+
+return res.status(400).json({
+
+success:false,
+
+message:"Charging is not active"
+
+});
+
+
+
+
+
+// calculate energy
+
+const duration =
+Number(booking.duration || 0);
+
+
+// Example charger power = 7kW
+
+const energy =
+Number(
+(
+7 *
+(duration / 60)
+)
+.toFixed(2)
+);
+
+
+
+// charging cost
+
+const ratePerUnit = 20;
+
+
+const chargingAmount =
+Number(
+(
+energy * ratePerUnit
+)
+.toFixed(2)
+);
+
+
+
+// platform fee
+
+const platformFee =
+Number(
+(
+chargingAmount * 0.10
+)
+.toFixed(2)
+);
+
+
+
+// owner amount
+
+const ownerAmount =
+Number(
+(
+chargingAmount - platformFee
+)
+.toFixed(2)
+);
+
+
+
+
+
+
+
+const updated =
+await pool.query(
+
+`
+UPDATE bookings
+
+SET
+
+booking_status='Completed',
+
+charging_status='completed',
+
+units_consumed=$1,
+
+amount_paid=$2,
+
+platform_commission=$3,
+
+owner_amount=$4
+
+WHERE id=$5
+
+RETURNING *
+
+`,
+
+[
+
+energy,
+
+chargingAmount,
+
+platformFee,
+
+ownerAmount,
+
+bookingId
+
+]
+
+);
+
+
+
+
+
+res.json({
+
+success:true,
+
+message:"Charging completed",
+
+booking:
+updated.rows[0]
+
+});
+
+
+
+}
+catch(error){
+
+
+console.log(
+"COMPLETE CHARGING ERROR",
+error
+);
+
+
+
+res.status(500).json({
+
+success:false,
+
+message:"Could not complete charging"
+
+});
+
+
+}
+
+
+});
 
 
 
@@ -1067,7 +1278,6 @@ try{
 
 const result =
 await pool.query(
-
 `
 SELECT *
 
@@ -1075,9 +1285,7 @@ FROM bookings
 
 WHERE id=$1
 
-`
-
-,
+`,
 [
 req.params.bookingId
 ]
@@ -1105,7 +1313,6 @@ result.rows[0];
 
 
 // AUTO COMPLETE WHEN TIME FINISHES
-
 
 if(
 
@@ -1166,7 +1373,7 @@ res.json({
 
 success:true,
 
-booking
+booking: booking
 
 });
 
@@ -1196,12 +1403,6 @@ message:"Charging details failed"
 
 
 });
-
-
-
-
-
-
 // =================================================
 // COMPLETE CHARGING MANUALLY
 // =================================================
@@ -1331,25 +1532,9 @@ req.params.bookingId
 
 
 
-if(result.rows.length===0)
-
-return res.status(404).json({
-
-success:false,
-
-message:"Booking not found"
-
-});
-
-
-
-const booking =
-result.rows[0];
-
-
-
 if(
-booking.booking_status==="Charging"
+booking.booking_status &&
+booking.booking_status.toLowerCase() === "charging"
 )
 
 return res.status(400).json({
@@ -1360,6 +1545,19 @@ message:"Already charging"
 
 });
 
+
+if(
+booking.booking_status &&
+booking.booking_status.toLowerCase() === "completed"
+)
+
+return res.status(400).json({
+
+success:false,
+
+message:"Charging already completed"
+
+});
 
 
 const duration =
@@ -1662,7 +1860,78 @@ success:false
 });
 
 
+app.post("/send-notification", async(req,res)=>{
 
+try{
+
+const {
+userId,
+title,
+body
+}=req.body;
+
+
+const user =
+await pool.query(
+`
+SELECT expo_push_token
+FROM users
+WHERE id=$1
+`,
+[userId]
+);
+
+
+const token =
+user.rows[0]?.expo_push_token;
+
+
+if(!token){
+
+return res.json({
+success:false,
+message:"No token found"
+});
+
+}
+
+
+await fetch(
+"https://exp.host/--/api/v2/push/send",
+{
+method:"POST",
+headers:{
+"Content-Type":"application/json"
+},
+body:JSON.stringify({
+
+to:token,
+
+title:title,
+
+body:body
+
+})
+});
+
+
+res.json({
+success:true
+});
+
+
+}
+catch(error){
+
+console.log(error);
+
+res.status(500).json({
+success:false
+});
+
+}
+
+});
 
 
 
@@ -2266,7 +2535,210 @@ message:"Review failed"
 
 });
 
+// =====================================
+// OWNER DASHBOARD
+// =====================================
 
+app.get(
+"/owner/dashboard/:ownerId",
+async(req,res)=>{
+
+
+try{
+
+
+const ownerId =
+req.params.ownerId;
+
+
+
+// total stations
+
+const stations =
+await pool.query(
+
+`
+SELECT COUNT(*) 
+FROM stations
+WHERE owner_id=$1
+
+`,
+[
+ownerId
+]
+
+);
+
+
+
+
+// total bookings
+
+const bookings =
+await pool.query(
+
+`
+SELECT COUNT(*)
+FROM bookings b
+
+JOIN stations s
+
+ON b.station_id=s.id
+
+WHERE s.owner_id=$1
+
+`,
+[
+ownerId
+]
+
+);
+
+
+
+
+// charging bookings
+
+const charging =
+await pool.query(
+
+`
+SELECT COUNT(*)
+FROM bookings b
+
+JOIN stations s
+
+ON b.station_id=s.id
+
+WHERE 
+s.owner_id=$1
+
+AND
+b.booking_status='Charging'
+
+`,
+[
+ownerId
+]
+
+);
+
+
+
+
+// completed bookings
+
+const completed =
+await pool.query(
+
+`
+SELECT COUNT(*)
+FROM bookings b
+
+JOIN stations s
+
+ON b.station_id=s.id
+
+WHERE 
+s.owner_id=$1
+
+AND
+b.booking_status='Completed'
+
+`,
+[
+ownerId
+]
+
+);
+
+
+
+
+// revenue
+
+const revenue =
+await pool.query(
+
+`
+SELECT 
+COALESCE(SUM(b.owner_amount),0) AS total_revenue
+
+FROM bookings b
+
+JOIN stations s
+
+ON b.station_id=s.id
+
+WHERE 
+s.owner_id=$1
+
+AND
+b.payment_status='success'
+
+`,
+[
+ownerId
+]
+
+);
+
+
+
+res.json({
+
+success:true,
+
+dashboard:{
+
+
+totalStations:
+Number(stations.rows[0].count),
+
+
+totalBookings:
+Number(bookings.rows[0].count),
+
+
+chargingNow:
+Number(charging.rows[0].count),
+
+
+completed:
+Number(completed.rows[0].count),
+
+revenue:
+Number(revenue.rows[0].total_revenue || 0)
+
+}
+
+
+});
+
+
+}
+catch(error){
+
+
+console.log(
+"OWNER DASHBOARD ERROR",
+error
+);
+
+
+res.status(500).json({
+
+success:false,
+
+message:"Dashboard failed"
+
+});
+
+
+}
+
+
+});
 
 
 
