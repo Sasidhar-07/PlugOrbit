@@ -374,6 +374,48 @@ app.post("/forgot-password", async (req, res) => {
     });
   }
 });
+
+
+
+app.post("/verify-reset-otp", async (req, res) => {
+  try {
+    const email = req.body.email?.trim().toLowerCase();
+    const otp = req.body.otp?.trim();
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        message: "Email and OTP are required",
+      });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT id
+      FROM users
+      WHERE LOWER(email) = $1
+        AND reset_otp = $2
+        AND reset_otp_expiry > NOW()
+      `,
+      [email, otp]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({
+        message: "Invalid or expired OTP",
+      });
+    }
+
+    return res.json({
+      message: "OTP verified successfully",
+    });
+  } catch (error) {
+    console.error("VERIFY OTP ERROR:", error);
+
+    return res.status(500).json({
+      message: "Unable to verify OTP",
+    });
+  }
+});
 // =================================================
 // CREATE RAZORPAY ORDER
 // =================================================
@@ -457,251 +499,47 @@ message:"Order creation failed"
 
 
 
-app.post(
-"/verify-payment-and-book",
-async(req,res)=>{
+app.post("/verify-reset-otp", async (req, res) => {
+  console.log("VERIFY RESET OTP API CALLED");
 
+  try {
+    const email = req.body.email?.trim().toLowerCase();
+    const otp = req.body.otp?.trim();
 
-const client =
-await pool.connect();
+    if (!email || !otp) {
+      return res.status(400).json({
+        message: "Email and OTP are required",
+      });
+    }
 
+    const result = await pool.query(
+      `
+      SELECT id
+      FROM users
+      WHERE LOWER(email) = $1
+        AND reset_otp = $2
+        AND reset_otp_expiry > NOW()
+      `,
+      [email, otp]
+    );
 
+    if (result.rows.length === 0) {
+      return res.status(400).json({
+        message: "Invalid or expired OTP",
+      });
+    }
 
-try{
+    return res.json({
+      message: "OTP verified successfully",
+    });
+  } catch (error) {
+    console.error("VERIFY OTP ERROR:", error);
 
-
-const {
-
-userId,
-
-stationId,
-
-stationName,
-
-date,
-
-time,
-
-vehicle,
-
-duration,
-
-razorpayPaymentId,
-
-razorpayOrderId,
-
-razorpaySignature
-
-
-}=req.body;
-
-
-
-const amount =
-SLOT_PRICES[Number(duration)];
-
-
-
-if(!amount)
-
-return res.status(400).json({
-
-message:"Invalid duration"
-
+    return res.status(500).json({
+      message: "Unable to verify OTP",
+    });
+  }
 });
-
-
-
-// verify signature
-
-
-const signature =
-crypto
-.createHmac(
-"sha256",
-process.env.RAZORPAY_KEY_SECRET
-)
-
-.update(
-`${razorpayOrderId}|${razorpayPaymentId}`
-)
-
-.digest("hex");
-
-
-
-if(signature!==razorpaySignature)
-
-return res.status(400).json({
-
-message:"Payment verification failed"
-
-});
-
-
-
-
-// prevent duplicate booking
-
-
-const duplicate =
-await pool.query(
-
-`
-SELECT id
-FROM bookings
-WHERE payment_id=$1
-`,
-[
-razorpayPaymentId
-]
-
-);
-
-
-
-if(duplicate.rows.length)
-
-return res.status(400).json({
-
-message:"Booking already exists"
-
-});
-
-
-
-
-
-const commission =
-Number(
-(amount*0.1)
-.toFixed(2)
-);
-
-
-
-const ownerAmount =
-amount-commission;
-
-
-
-
-const booking =
-await client.query(
-
-`
-INSERT INTO bookings
-
-(
-user_id,
-station_id,
-station_name,
-date,
-time,
-vehicle,
-duration,
-payment_id,
-order_id,
-payment_status,
-booking_status,
-charging_status,
-amount_paid,
-platform_commission,
-owner_amount,
-price_per_unit
-)
-
-VALUES
-
-(
-$1,$2,$3,$4,$5,$6,$7,$8,$9,
-'success',
-'Booked',
-'waiting',
-$10,$11,$12,
-0
-)
-
-RETURNING *
-
-`
-
-,
-
-[
-
-userId,
-
-stationId,
-
-stationName,
-
-date,
-
-time,
-
-vehicle,
-
-duration,
-
-razorpayPaymentId,
-
-razorpayOrderId,
-
-amount,
-
-commission,
-
-ownerAmount
-
-]
-
-
-);
-
-
-
-res.json({
-
-success:true,
-
-booking:booking.rows[0]
-
-});
-
-
-
-}
-catch(error){
-
-
-console.log(
-"BOOKING ERROR",
-error
-);
-
-
-
-res.status(500).json({
-
-message:"Booking failed"
-
-});
-
-
-}
-finally{
-
-
-client.release();
-
-
-}
-
-
-});
-
-
 
 
 // =================================================
