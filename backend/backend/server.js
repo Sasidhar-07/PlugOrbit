@@ -325,11 +325,19 @@ app.post("/forgot-password", async (req, res) => {
 
     const { data, error } = await resend.emails.send({
       from: "PlugOrbit <onboarding@resend.dev>",
-      to: [email],
+
+      // Temporary testing address.
+      // Resend test mode can send only to your Resend account email.
+      to: ["plugorbitapp@gmail.com"],
+
       subject: "PlugOrbit Password Reset OTP",
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px;">
           <h2>PlugOrbit Password Reset</h2>
+
+          <p>A password reset was requested for:</p>
+
+          <p><strong>${email}</strong></p>
 
           <p>Your OTP is:</p>
 
@@ -353,9 +361,10 @@ app.post("/forgot-password", async (req, res) => {
     }
 
     console.log("OTP EMAIL SENT:", data?.id);
+    console.log("RESET REQUESTED FOR:", email);
 
     return res.json({
-      message: "OTP sent to your email",
+      message: "OTP sent successfully",
     });
   } catch (error) {
     console.error("FORGOT PASSWORD ERROR:", error);
