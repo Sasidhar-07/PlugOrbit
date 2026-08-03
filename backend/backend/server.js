@@ -1,6 +1,14 @@
 const express = require("express");
 const cors = require("cors");
+const nodemailer = require("nodemailer");
 require("dotenv").config();
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 const pool = require("./db");
 
@@ -278,82 +286,77 @@ message:"Login failed"
 });
 
 
-app.post("/forgot-password", async(req,res)=>{
+app.post("/forgot-password", async (req, res) => {
   console.log("FORGOT PASSWORD API CALLED");
 
-try{
+  try {
+    const email = req.body.email.trim().toLowerCase();
 
-const {email}=req.body;
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM users
+      WHERE LOWER(email)=$1
+      `,
+      [email]
+    );
 
+    if (result.rows.length === 0) {
+      return res.status(400).json({
+        message: "Email not registered",
+      });
+    }
 
-const result = await pool.query(
-`
-SELECT *
-FROM users
-WHERE email=$1
-`,
-[email]
-);
+    const otp = Math.floor(
+      100000 + Math.random() * 900000
+    ).toString();
 
+    await pool.query(
+      `
+      UPDATE users
+      SET
+      reset_otp=$1,
+      reset_otp_expiry=NOW()+INTERVAL '10 minutes'
+      WHERE email=$2
+      `,
+      [otp, email]
+    );
 
-if(result.rows.length===0){
+    await transporter.sendMail({
+  from: process.env.EMAIL_USER,
+  to: email,
+  subject: "PlugOrbit Password Reset OTP",
 
-return res.status(400).json({
-message:"Email not registered"
+  html: `
+    <h2>PlugOrbit Password Reset</h2>
+
+    <p>Your OTP is:</p>
+
+    <h1 style="letter-spacing:5px;">
+      ${otp}
+    </h1>
+
+    <p>This OTP is valid for 10 minutes.</p>
+
+    <p>If you didn't request this, ignore this email.</p>
+  `,
 });
 
-}
+console.log("OTP mailed:", otp);
 
+    console.log("OTP mailed:", otp);
 
-// generate OTP
+    res.json({
+      message: "OTP sent to your email",
+    });
+  } catch (error) {
+    console.log(error);
 
-const otp = Math.floor(
-100000 + Math.random()*900000
-).toString();
-
-
-
-await pool.query(
-`
-UPDATE users
-SET reset_otp=$1,
-reset_otp_expiry=NOW()+INTERVAL '10 minutes'
-WHERE email=$2
-`,
-[
-otp,
-email
-]
-);
-
-
-
-console.log("OTP:",otp);
-
-
-
-res.json({
-
-message:"OTP sent successfully"
-
+    res.status(500).json({
+      message: "Unable to send OTP",
+    });
+  }
 });
-
-
-}
-catch(error){
-
-console.log(error);
-
-res.status(500).json({
-
-message:"Server error"
-
-});
-
-}
-
-});
-
 // =================================================
 // CREATE RAZORPAY ORDER
 // =================================================
@@ -375,7 +378,7 @@ const amount =
 SLOT_PRICES[duration];
 
 
-
+await transporter.sendMail
 if(!amount)
 
 return res.status(400).json({
