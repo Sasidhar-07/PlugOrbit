@@ -1,14 +1,10 @@
 const express = require("express");
 const cors = require("cors");
-const nodemailer = require("nodemailer");
+
 require("dotenv").config();
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const { Resend } = require("resend");
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const pool = require("./db");
 
@@ -290,13 +286,19 @@ app.post("/forgot-password", async (req, res) => {
   console.log("FORGOT PASSWORD API CALLED");
 
   try {
-    const email = req.body.email.trim().toLowerCase();
+    const email = req.body.email?.trim().toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
 
     const result = await pool.query(
       `
       SELECT *
       FROM users
-      WHERE LOWER(email)=$1
+      WHERE LOWER(email) = $1
       `,
       [email]
     );
@@ -314,45 +316,51 @@ app.post("/forgot-password", async (req, res) => {
     await pool.query(
       `
       UPDATE users
-      SET
-      reset_otp=$1,
-      reset_otp_expiry=NOW()+INTERVAL '10 minutes'
-      WHERE email=$2
+      SET reset_otp = $1,
+          reset_otp_expiry = NOW() + INTERVAL '10 minutes'
+      WHERE LOWER(email) = $2
       `,
       [otp, email]
     );
 
-    await transporter.sendMail({
-  from: process.env.EMAIL_USER,
-  to: email,
-  subject: "PlugOrbit Password Reset OTP",
+    const { data, error } = await resend.emails.send({
+      from: "PlugOrbit <onboarding@resend.dev>",
+      to: [email],
+      subject: "PlugOrbit Password Reset OTP",
+      html: `
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+          <h2>PlugOrbit Password Reset</h2>
 
-  html: `
-    <h2>PlugOrbit Password Reset</h2>
+          <p>Your OTP is:</p>
 
-    <p>Your OTP is:</p>
+          <h1 style="letter-spacing: 5px;">
+            ${otp}
+          </h1>
 
-    <h1 style="letter-spacing:5px;">
-      ${otp}
-    </h1>
+          <p>This OTP is valid for 10 minutes.</p>
 
-    <p>This OTP is valid for 10 minutes.</p>
+          <p>If you did not request this, ignore this email.</p>
+        </div>
+      `,
+    });
 
-    <p>If you didn't request this, ignore this email.</p>
-  `,
-});
+    if (error) {
+      console.error("RESEND EMAIL ERROR:", error);
 
-console.log("OTP mailed:", otp);
+      return res.status(500).json({
+        message: error.message || "Unable to send OTP",
+      });
+    }
 
-    console.log("OTP mailed:", otp);
+    console.log("OTP EMAIL SENT:", data?.id);
 
-    res.json({
+    return res.json({
       message: "OTP sent to your email",
     });
   } catch (error) {
-    console.log(error);
+    console.error("FORGOT PASSWORD ERROR:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       message: "Unable to send OTP",
     });
   }
