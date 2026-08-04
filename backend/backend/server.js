@@ -16,6 +16,36 @@ const crypto = require("crypto");
 const app = express();
 
 const PORT = process.env.PORT || 5001;
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({
+      message: "Authentication required",
+    });
+  }
+
+  try {
+    req.user = jwt.verify(token, process.env.JWT_SECRET);
+    next();
+  } catch (error) {
+    return res.status(403).json({
+      message: "Invalid or expired token",
+    });
+  }
+};
+const allowRoles = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        message: "Access denied",
+      });
+    }
+
+    next();
+  };
+};
 
 
 // ================= MIDDLEWARE =================
@@ -2177,8 +2207,10 @@ message:"Revenue failed"
 
 
 app.get(
-"/admin/dashboard",
-async(req,res)=>{
+  "/admin/dashboard",
+  authenticateToken,
+  allowRoles("admin"),
+  async (req, res) => {
 
 
 try{
@@ -2279,6 +2311,8 @@ message:"Admin dashboard failed"
 
 app.get(
 "/admin/bookings",
+authenticateToken,
+allowRoles("admin"),
 async(req,res)=>{
 
 
@@ -2349,6 +2383,8 @@ message:"Bookings failed"
 
 app.get(
 "/admin/stations",
+authenticateToken,
+allowRoles("admin"),
 async(req,res)=>{
 
 
