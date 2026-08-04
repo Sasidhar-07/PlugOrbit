@@ -324,11 +324,11 @@ app.post("/forgot-password", async (req, res) => {
     );
 
     const { data, error } = await resend.emails.send({
-      from: "PlugOrbit <onboarding@resend.dev>",
+      from: process.env.EMAIL_FROM,
 
       // Temporary testing address.
       // Resend test mode can send only to your Resend account email.
-      to: ["plugorbitapp@gmail.com"],
+      to: [email],
 
       subject: "PlugOrbit Password Reset OTP",
       html: `
