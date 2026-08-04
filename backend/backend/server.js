@@ -518,76 +518,36 @@ app.post("/reset-password", async (req, res) => {
 
 
 
-app.post("/create-order",async(req,res)=>{
+app.post("/create-order", async (req, res) => {
+  try {
+    const duration = Number(req.body.duration);
 
+    const amount = SLOT_PRICES[duration];
 
-try{
+    if (!amount) {
+      return res.status(400).json({
+        message: "Invalid duration",
+      });
+    }
 
+    const order = await razorpay.orders.create({
+      amount: amount * 100,
+      currency: "INR",
+      receipt: `plug_${Date.now()}`,
+    });
 
-const duration =
-Number(req.body.duration);
+    return res.json({
+      success: true,
+      order,
+    });
+  } catch (error) {
+    console.error("CREATE ORDER ERROR:", error);
 
-
-
-const amount =
-SLOT_PRICES[duration];
-
-
-await transporter.sendMail
-if(!amount)
-
-return res.status(400).json({
-
-message:"Invalid duration"
-
+    return res.status(500).json({
+      message: "Order creation failed",
+    });
+  }
 });
-
-
-
-const order =
-await razorpay.orders.create({
-
-amount:amount*100,
-
-currency:"INR",
-
-receipt:
-`plug_${Date.now()}`
-
-});
-
-
-
-res.json({
-
-success:true,
-
-order
-
-});
-
-
-}
-catch(error){
-
-
-console.log(error);
-
-
-res.status(500).json({
-
-message:"Order creation failed"
-
-});
-
-
-}
-
-
-});
-
-
-
 
 // =================================================
 // VERIFY PAYMENT + CREATE BOOKING
