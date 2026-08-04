@@ -416,6 +416,69 @@ app.post("/verify-reset-otp", async (req, res) => {
     });
   }
 });
+
+
+app.post("/reset-password", async (req, res) => {
+  console.log("RESET PASSWORD API CALLED");
+
+  try {
+    const email = req.body.email?.trim().toLowerCase();
+    const otp = req.body.otp?.trim();
+    const newPassword = req.body.newPassword;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({
+        message: "Email, OTP and new password are required",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        message: "Password must contain at least 6 characters",
+      });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT id
+      FROM users
+      WHERE LOWER(email) = $1
+        AND reset_otp = $2
+        AND reset_otp_expiry > NOW()
+      `,
+      [email, otp]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({
+        message: "Invalid or expired OTP",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await pool.query(
+      `
+      UPDATE users
+      SET password = $1,
+          reset_otp = NULL,
+          reset_otp_expiry = NULL
+      WHERE LOWER(email) = $2
+      `,
+      [hashedPassword, email]
+    );
+
+    return res.json({
+      message: "Password reset successfully",
+    });
+  } catch (error) {
+    console.error("RESET PASSWORD ERROR:", error);
+
+    return res.status(500).json({
+      message: "Unable to reset password",
+    });
+  }
+});
 // =================================================
 // CREATE RAZORPAY ORDER
 // =================================================
