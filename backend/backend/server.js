@@ -2427,7 +2427,34 @@ message:"Stations failed"
 });
 
 
+app.get(
+  "/admin/pending-stations",
+  authenticateToken,
+  allowRoles("admin"),
+  async (req, res) => {
+    try {
+      const result = await pool.query(`
+        SELECT
+          s.*,
+          u.name AS owner_name,
+          u.email AS owner_email
+        FROM stations s
+        LEFT JOIN users u
+          ON s.owner_id = u.id
+        WHERE LOWER(s.approval_status) = 'pending'
+        ORDER BY s.created_at DESC
+      `);
 
+      return res.json(result.rows);
+    } catch (error) {
+      console.error("PENDING STATIONS ERROR:", error);
+
+      return res.status(500).json({
+        message: "Unable to load pending stations",
+      });
+    }
+  }
+);
 
 
 
