@@ -243,27 +243,30 @@ message:"Wrong password"
 
 
 
-const token =
-jwt.sign(
+const role = String(user.role || "customer").toLowerCase();
 
-{
-id:user.id
-},
-
-process.env.JWT_SECRET
-
+const token = jwt.sign(
+  {
+    id: user.id,
+    email: user.email,
+    role,
+  },
+  process.env.JWT_SECRET,
+  {
+    expiresIn: "7d",
+  }
 );
 
-
-
-res.json({
-
-token,
-
-user
-
+return res.json({
+  token,
+  user: {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    role,
+  },
 });
-
 
 }
 catch(error){
