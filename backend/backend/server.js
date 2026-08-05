@@ -555,49 +555,155 @@ app.post("/create-order", async (req, res) => {
 
 
 
-app.post("/verify-reset-otp", async (req, res) => {
-  console.log("VERIFY RESET OTP API CALLED");
-
+app.post("/verify-payment-and-book", async (req, res) => {
   try {
-    const email = req.body.email?.trim().toLowerCase();
-    const otp = req.body.otp?.trim();
+    const {
+      userId,
+      stationId,
+      stationName,
+      date,
+      time,
+      vehicle,
+      duration,
+      razorpayPaymentId,
+      razorpayOrderId,
+      razorpaySignature,
+    } = req.body;
 
-    if (!email || !otp) {
+    console.log("VERIFY PAYMENT BODY:", {
+      userId,
+      stationId,
+      stationName,
+      date,
+      time,
+      vehicle,
+      duration,
+      razorpayPaymentId,
+      razorpayOrderId,
+      hasSignature: Boolean(razorpaySignature),
+    });
+
+    if (
+      !userId ||
+      !stationId ||
+      !date ||
+      !time ||
+      !duration ||
+      !razorpayPaymentId ||
+      !razorpayOrderId ||
+      !razorpaySignature
+    ) {
       return res.status(400).json({
-        message: "Email and OTP are required",
+        success: false,
+        message: "Missing payment or booking details",
+      });
+    }
+
+    const generatedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+      .digest("hex");
+
+    if (generatedSignature !== razorpaySignature) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment verification failed",
+      });
+    }
+
+    const amount = SLOT_PRICES[Number(duration)];
+
+    if (!amount) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid duration",
+      });
+    }
+
+    const platformCommission = Number((amount * 0.1).toFixed(2));
+    const ownerAmount = Number(
+      (amount - platformCommission).toFixed(2)
+    );
+
+    const existingPayment = await pool.query(
+      `
+      SELECT id
+      FROM bookings
+      WHERE razorpay_payment_id = $1
+      `,
+      [razorpayPaymentId]
+    );
+
+    if (existingPayment.rows.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking already created for this payment",
       });
     }
 
     const result = await pool.query(
       `
-      SELECT id
-      FROM users
-      WHERE LOWER(email) = $1
-        AND reset_otp = $2
-        AND reset_otp_expiry > NOW()
+      INSERT INTO bookings (
+        user_id,
+        station_id,
+        station_name,
+        vehicle,
+        date,
+        time,
+        duration,
+        payment_status,
+        booking_status,
+        charging_status,
+        amount_paid,
+        platform_commission,
+        owner_amount,
+        razorpay_payment_id,
+        razorpay_order_id
+      )
+      VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, $9, $10,
+        $11, $12, $13, $14, $15
+      )
+      RETURNING *
       `,
-      [email, otp]
+      [
+        userId,
+        stationId,
+        stationName || "PlugOrbit Station",
+        vehicle || "Not provided",
+        date,
+        time,
+        Number(duration),
+        "success",
+        "Booked",
+        "not_started",
+        amount,
+        platformCommission,
+        ownerAmount,
+        razorpayPaymentId,
+        razorpayOrderId,
+      ]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(400).json({
-        message: "Invalid or expired OTP",
-      });
-    }
-
     return res.json({
-      message: "OTP verified successfully",
+      success: true,
+      message: "Payment verified and booking created",
+      booking: result.rows[0],
     });
   } catch (error) {
-    console.error("VERIFY OTP ERROR:", error);
+    console.error("VERIFY PAYMENT AND BOOK ERROR:", error);
 
     return res.status(500).json({
-      message: "Unable to verify OTP",
+      success: false,
+      message: "Booking failed",
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error),
     });
   }
 });
-
-
 // =================================================
 // HISTORY
 // =================================================
