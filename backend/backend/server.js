@@ -1607,15 +1607,18 @@ message:"Booking not found"
 
 
 
-res.json({
+const completedBooking = result.rows[0];
 
-success:true,
+await sendPushNotification(
+  completedBooking.user_id,
+  "Charging Completed ✅",
+  `Your charging session at ${completedBooking.station_name} has been completed successfully.`
+);
 
-message:"Charging completed",
-
-booking:
-result.rows[0]
-
+return res.json({
+  success: true,
+  message: "Charging completed",
+  booking: completedBooking,
 });
 
 
