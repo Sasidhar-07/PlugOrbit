@@ -14,6 +14,50 @@ const Razorpay = require("razorpay");
 const crypto = require("crypto");
 
 const app = express();
+const sendPushNotification = async (userId, title, body) => {
+  try {
+    const userResult = await pool.query(
+      `
+      SELECT expo_push_token
+      FROM users
+      WHERE id = $1
+      `,
+      [userId]
+    );
+
+    const token = userResult.rows[0]?.expo_push_token;
+
+    if (!token) {
+      console.log("NO PUSH TOKEN FOR USER:", userId);
+      return false;
+    }
+
+    const pushResponse = await fetch(
+      "https://exp.host/--/api/v2/push/send",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          to: token,
+          sound: "default",
+          title,
+          body,
+        }),
+      }
+    );
+
+    const pushData = await pushResponse.json();
+
+    console.log("PUSH NOTIFICATION RESPONSE:", pushData);
+
+    return pushResponse.ok;
+  } catch (error) {
+    console.log("SEND PUSH NOTIFICATION ERROR:", error);
+    return false;
+  }
+};
 
 const PORT = process.env.PORT || 5001;
 const authenticateToken = (req, res, next) => {
@@ -686,11 +730,19 @@ app.post("/verify-payment-and-book", async (req, res) => {
       ]
     );
 
-    return res.json({
-      success: true,
-      message: "Payment verified and booking created",
-      booking: result.rows[0],
-    });
+    const createdBooking = result.rows[0];
+
+await sendPushNotification(
+  createdBooking.user_id,
+  "Booking Confirmed ✅",
+  `Your booking at ${createdBooking.station_name} is confirmed for ${createdBooking.date} at ${createdBooking.time}.`
+);
+
+return res.json({
+  success: true,
+  message: "Payment verified and booking created",
+  booking: createdBooking,
+});
   } catch (error) {
     console.error("VERIFY PAYMENT AND BOOK ERROR:", error);
 
@@ -1315,15 +1367,18 @@ bookingId
 
 
 
-res.json({
+const completedBooking = result.rows[0];
 
-success:true,
+await sendPushNotification(
+  completedBooking.user_id,
+  "Charging Completed ✅",
+  `Your charging session at ${completedBooking.station_name} has been completed successfully.`
+);
 
-message:"Charging completed",
-
-booking:
-updated.rows[0]
-
+return res.json({
+  success: true,
+  message: "Charging completed",
+  booking: completedBooking,
 });
 
 
