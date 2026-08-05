@@ -1483,35 +1483,33 @@ new Date()
 
 
 
-const completed =
-await pool.query(
-
-`
-UPDATE bookings
-
-SET
-
-booking_status='Completed',
-
-charging_status='completed'
-
-WHERE id=$1
-
-RETURNING *
-
-`
-
-,
-[
-req.params.bookingId
-]
-
+const completed = await pool.query(
+  `
+  UPDATE bookings
+  SET
+    booking_status = 'Completed',
+    charging_status = 'completed',
+    charging_end_time = NOW()
+  WHERE id = $1
+  RETURNING *
+  `,
+  [req.params.bookingId]
 );
 
+booking = completed.rows[0];
 
+if (booking) {
+  await sendPushNotification(
+    booking.user_id,
+    "Charging Completed ✅",
+    `Your charging session at ${booking.station_name} has been completed successfully.`
+  );
 
-booking =
-completed.rows[0];
+  console.log(
+    "AUTO COMPLETION NOTIFICATION SENT FOR BOOKING:",
+    booking.id
+  );
+}
 
 
 }
